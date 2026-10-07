@@ -13,7 +13,10 @@ import (
 	"islet/backend/internal/response"
 )
 
-//go:embed admin
+// all: 前缀不可省略：默认 embed 会排除 _ 和 . 开头的文件，
+// 而 Vite 产物中存在 _plugin-vue_export-helper-*.js 这类下划线开头的 chunk。
+// /assets/ 下缺失的文件显式 404，不能回退 index.html（模块加载器会因 MIME 拒绝）。
+//go:embed all:admin
 var adminFS embed.FS
 
 // RegisterAdminSPA 把嵌入的 Vue SPA 挂到管理端口（NoRoute 兜底，API 404 保持 JSON）。
@@ -52,6 +55,10 @@ func RegisterAdminSPA(engine *gin.Engine) {
 				serve(c, name)
 				return
 			}
+		}
+		if strings.HasPrefix(uriPath, "/assets/") {
+			response.NotFound(c, "not found")
+			return
 		}
 		// SPA 前端路由回退
 		serve(c, "index.html")

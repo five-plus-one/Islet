@@ -6,6 +6,14 @@
 
 **v0.1.0 完成**：P0–P6 一次性开发全部交付，容器全链路验收通过。
 
+## 白屏事件（2026-10-07）
+
+- 现象：管理端 18091 全白屏，Vue 已挂载但路由不渲染
+- 根因：go:embed 默认排除 _ 开头文件，Vite chunk _plugin-vue_export-helper-*.js 未嵌入，
+  请求被 SPA fallback 成 index.html（200+HTML），模块加载器拒载，懒加载路由全部失败
+- 修复：//go:embed all:admin + /assets/ 缺失显式 404（提交 61e75d3）
+- 教训：嵌入前端产物必须用 all: 前缀；SPA fallback 不得覆盖 /assets/ 路径
+
 ## Git
 
 - 2026-10-05 初始化仓库（默认分支 `main`），首个提交 `8cfb13e` 含全部 80 个文件，已打 `v0.1.0` 标签

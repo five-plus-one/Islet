@@ -276,6 +276,11 @@ export const api = {
   settings: () => request<Record<string, string>>('/api/admin/settings'),
   saveSettings: (values: Record<string, string>) =>
     request<Record<string, string>>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(values) }),
+  adminTestOIDC: (issuer: string) =>
+    request<{ issuer: string; authorization_endpoint: string; token_endpoint: string; jwks_uri: string }>(
+      '/api/admin/auth/test-oidc',
+      { method: 'POST', body: JSON.stringify({ issuer }) }
+    ),
 
   recycleList: () => request<{ items: ImageItem[] }>('/api/admin/recycle'),
   purgeAllRecycle: () => request<{ purged: number }>('/api/admin/recycle/purge-all', { method: 'POST' }),

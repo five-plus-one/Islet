@@ -54,7 +54,12 @@
 | GET/PUT | /api/admin/settings | system_configs 读写（品牌、站点、注册、回收站） |
 | GET | /api/admin/audit-logs | 审计日志 |
 | GET | /api/admin/recycle、POST /purge-all | 回收站总览 / 清空（按保留期） |
+| POST | /api/admin/auth/test-oidc | OIDC Discovery 检查（系统设置页用） |
 | POST | /api/admin/system/reset | 恢复初始化（super_admin，重新认证+确认短语） |
+
+## OIDC 运行时配置
+
+OIDC 连接信息支持两级来源：`system_configs`（系统设置页可改，热生效）优先于配置文件/环境变量（初始化向导写入）。相关键：`auth.oidc_issuer`、`auth.oidc_client_id`、`auth.oidc_audience`、`auth.oidc_scopes`、`auth.local_enabled`（本地登录开关，默认开）。修改后登录页与 Bearer 验签即时使用新配置。
 
 ## 鉴权头
 

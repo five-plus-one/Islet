@@ -146,7 +146,7 @@ func handleSetupTestDatabase(c *gin.Context) {
 	response.OK(c, payload)
 }
 
-// handleSetupTestOIDC 标准 OIDC Discovery 检查。
+// handleSetupTestOIDC 标准 OIDC Discovery 检查，通过后把连接信息持久化到配置文件。
 func handleSetupTestOIDC(c *gin.Context) {
 	if setupLocked(c) {
 		return
@@ -163,6 +163,18 @@ func handleSetupTestOIDC(c *gin.Context) {
 	meta, err := oidc.Discover(c.Request.Context(), in.Issuer)
 	if err != nil {
 		response.BadRequest(c, err.Error())
+		return
+	}
+	// Discovery 通过即落盘，后续 verify/login 直接可用
+	cfg := config.Load()
+	if strings.TrimSpace(in.Issuer) != "" {
+		cfg.OIDCIssuer = strings.TrimSpace(in.Issuer)
+	}
+	if strings.TrimSpace(in.ClientID) != "" {
+		cfg.OIDCClientID = strings.TrimSpace(in.ClientID)
+	}
+	if err := config.SaveFile(cfg.ConfigFile, cfg); err != nil {
+		response.ServerError(c, "写入配置失败："+err.Error())
 		return
 	}
 	response.OK(c, gin.H{
@@ -193,7 +205,7 @@ func handleSetupVerifyAdmin(c *gin.Context) {
 	switch strings.TrimSpace(in.Mode) {
 	case model.AuthSourceOIDC:
 		if cfg.OIDCIssuer == "" || cfg.OIDCClientID == "" {
-			response.BadRequest(c, "请先在配置中填写 OIDC Issuer 与 Client ID（写入配置文件或环境变量）")
+			response.BadRequest(c, "请先在向导中填写 Issuer 与 Client ID 并通过 Discovery 检查")
 			return
 		}
 		audience := cfg.OIDCAudience
@@ -380,10 +392,15 @@ type authConfigPayload struct {
 }
 
 func buildAuthConfig(cfg config.Config, req *http.Request, settings *service.SettingsService) authConfigPayload {
-	issuer := cfg.OIDCIssuer
+	// 生效认证配置：system_configs 优先，配置文件兜底（登录页与向导页共用）
+	effective := service.ResolveAuth(settings, service.EffectiveAuth{
+		Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID,
+		Audience: cfg.OIDCAudience, Scopes: cfg.OIDCScopes,
+	})
+	issuer := effective.Issuer
 	authEndpoint := ""
 	tokenEndpoint := ""
-	if issuer != "" {
+	if issuer != "" && effective.ClientID != "" {
 		oidc := service.NewOIDCService()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if meta, err := oidc.Discover(ctx, issuer); err == nil {
@@ -395,10 +412,10 @@ func buildAuthConfig(cfg config.Config, req *http.Request, settings *service.Set
 	}
 	payload := authConfigPayload{
 		Mode:                  cfg.AuthMode,
-		LocalEnabled:          cfg.AuthMode == model.AuthSourceLocal,
+		LocalEnabled:          effective.LocalEnabled,
 		Issuer:                issuer,
-		ClientID:              cfg.OIDCClientID,
-		Scopes:                cfg.OIDCScopes,
+		ClientID:              effective.ClientID,
+		Scopes:                effective.Scopes,
 		AuthorizationEndpoint: authEndpoint,
 		TokenEndpoint:         tokenEndpoint,
 		RedirectURI:           adminBaseURL(cfg, req) + "/auth/callback",
@@ -462,11 +479,18 @@ func registerAuthRoutes(api *gin.RouterGroup, deps *Deps) {
 			return
 		}
 		cfg := config.Load()
-		if cfg.AuthMode != model.AuthSourceOIDC || cfg.OIDCIssuer == "" || cfg.OIDCClientID == "" {
-			response.BadRequest(c, "当前未启用 OIDC 登录")
+		if deps != nil {
+			cfg = deps.Cfg
+		}
+		effective := service.ResolveAuth(deps.Settings, service.EffectiveAuth{
+			Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID,
+			Audience: cfg.OIDCAudience, Scopes: cfg.OIDCScopes,
+		})
+		if effective.Issuer == "" || effective.ClientID == "" {
+			response.BadRequest(c, "当前未配置 OIDC 登录，请在系统设置中填写 Issuer 与 Client ID")
 			return
 		}
-		meta, err := deps.OIDC.Discover(c.Request.Context(), cfg.OIDCIssuer)
+		meta, err := deps.OIDC.Discover(c.Request.Context(), effective.Issuer)
 		if err != nil {
 			response.BadRequest(c, "OIDC Discovery 失败："+err.Error())
 			return
@@ -479,7 +503,7 @@ func registerAuthRoutes(api *gin.RouterGroup, deps *Deps) {
 			"grant_type":    {"authorization_code"},
 			"code":          {in.Code},
 			"code_verifier": {in.CodeVerifier},
-			"client_id":     {cfg.OIDCClientID},
+			"client_id":     {effective.ClientID},
 			"redirect_uri":  {redirectURI},
 		}
 		tokenResp, err := exchangeToken(c.Request.Context(), meta.TokenEndpoint, form)
@@ -488,12 +512,12 @@ func registerAuthRoutes(api *gin.RouterGroup, deps *Deps) {
 			return
 		}
 		// 校验 access token 可验签且主体一致
-		audience := cfg.OIDCAudience
+		audience := effective.Audience
 		if audience == "" {
-			audience = cfg.OIDCClientID
+			audience = effective.ClientID
 		}
 		identity, err := deps.OIDC.Verify(c.Request.Context(), tokenResp.AccessToken, service.VerifyOptions{
-			Issuer: cfg.OIDCIssuer, Audience: audience,
+			Issuer: effective.Issuer, Audience: audience,
 		})
 		if err != nil {
 			response.Unauthorized(c, "令牌验证失败："+err.Error())

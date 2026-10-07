@@ -3,6 +3,38 @@
     <n-h2>系统设置</n-h2>
     <n-grid :cols="2" :x-gap="14">
       <n-gi>
+        <n-card title="OIDC 认证" size="small" style="margin-bottom: 14px">
+          <n-alert v-if="!oidcIssuer" type="warning" size="small" style="margin-bottom: 10px">
+            未配置 OIDC 时登录页仅显示本地账号
+          </n-alert>
+          <n-form label-placement="left" label-width="150">
+            <n-form-item label="Issuer">
+              <n-input v-model:value="oidcIssuer" placeholder="https://sso.example.com" />
+            </n-form-item>
+            <n-form-item label="Client ID">
+              <n-input v-model:value="oidcClientID" />
+            </n-form-item>
+            <n-form-item label="Audience（可选）">
+              <n-input v-model:value="oidcAudience" placeholder="留空则使用 Client ID" />
+            </n-form-item>
+            <n-form-item label="Scopes">
+              <n-input v-model:value="oidcScopes" placeholder="openid profile email" />
+            </n-form-item>
+            <n-form-item label="本地登录">
+              <n-switch v-model:value="localEnabled" />
+              <n-text depth="3" style="margin-left: 8px; font-size: 12px">关闭后登录页仅显示 OIDC 按钮</n-text>
+            </n-form-item>
+          </n-form>
+          <n-alert v-if="oidcTestResult" :type="oidcTestOk ? 'success' : 'error'" size="small" closable @close="oidcTestResult = ''">
+            {{ oidcTestResult }}
+          </n-alert>
+          <template #footer>
+            <n-space justify="space-between">
+              <n-button :loading="testingOIDC" @click="handleTestOIDC">检查 Discovery</n-button>
+              <n-text depth="3" style="font-size: 12px">保存后即时生效，无需重启</n-text>
+            </n-space>
+          </template>
+        </n-card>
         <n-card title="品牌与登录" size="small">
           <n-form label-placement="left" label-width="150">
             <n-form-item label="品牌名称"><n-input v-model:value="values['brand.name']" /></n-form-item>
@@ -55,7 +87,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { NButton, NCard, NForm, NFormItem, NGrid, NGi, NH2, NInput, NInputNumber, NPopconfirm, NSpace, NSwitch, useMessage } from 'naive-ui';
+import { NAlert, NButton, NCard, NForm, NFormItem, NGrid, NGi, NH2, NInput, NInputNumber, NPopconfirm, NSpace, NSwitch, NText, useMessage } from 'naive-ui';
 import { api } from '../api';
 import { useAuthStore } from '../stores/auth';
 import { useRouter } from 'vue-router';
@@ -64,9 +96,52 @@ const values = ref<Record<string, string>>({});
 const saving = ref(false);
 const resetConfirm = ref('');
 const resetPassword = ref('');
+const testingOIDC = ref(false);
+const oidcTestResult = ref('');
+const oidcTestOk = ref(false);
 const message = useMessage();
 const auth = useAuthStore();
 const router = useRouter();
+
+const oidcIssuer = computed({
+  get: () => values.value['auth.oidc_issuer'] ?? '',
+  set: (v: string) => (values.value['auth.oidc_issuer'] = v)
+});
+const oidcClientID = computed({
+  get: () => values.value['auth.oidc_client_id'] ?? '',
+  set: (v: string) => (values.value['auth.oidc_client_id'] = v)
+});
+const oidcAudience = computed({
+  get: () => values.value['auth.oidc_audience'] ?? '',
+  set: (v: string) => (values.value['auth.oidc_audience'] = v)
+});
+const oidcScopes = computed({
+  get: () => values.value['auth.oidc_scopes'] ?? '',
+  set: (v: string) => (values.value['auth.oidc_scopes'] = v)
+});
+const localEnabled = computed({
+  get: () => (values.value['auth.local_enabled'] ?? 'true') !== 'false',
+  set: (v: boolean) => (values.value['auth.local_enabled'] = String(v))
+});
+
+async function handleTestOIDC() {
+  if (!oidcIssuer.value.trim()) {
+    oidcTestOk.value = false;
+    oidcTestResult.value = '请先填写 Issuer';
+    return;
+  }
+  testingOIDC.value = true;
+  try {
+    const meta = await api.adminTestOIDC(oidcIssuer.value.trim());
+    oidcTestOk.value = true;
+    oidcTestResult.value = `Discovery 通过：${meta.issuer}（授权端点 ${new URL(meta.authorization_endpoint).host}）`;
+  } catch (err) {
+    oidcTestOk.value = false;
+    oidcTestResult.value = err instanceof Error ? err.message : 'Discovery 检查失败';
+  } finally {
+    testingOIDC.value = false;
+  }
+}
 
 const autoApprove = computed({
   get: () => values.value['users.auto_approve'] === 'true',

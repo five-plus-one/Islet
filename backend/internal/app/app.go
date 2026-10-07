@@ -88,7 +88,7 @@ func (a *App) buildServices(cfg config.Config, db *gorm.DB, rdb *redis.Client) *
 	albums := service.NewAlbumService(db)
 	stats := service.NewStatsService(db, uploads)
 	audit := service.NewAuditService(db)
-	authenticator := middleware.NewAuthenticator(func() config.Config { return cfg }, a.logger, db, oidc, tokens)
+	authenticator := middleware.NewAuthenticator(func() config.Config { return cfg }, a.logger, db, oidc, tokens, settings)
 	return &router.Deps{
 		Cfg: cfg, Logger: a.logger, DB: db, Redis: rdb,
 		Settings: settings, OIDC: oidc, Auth: auth, Tokens: tokens,

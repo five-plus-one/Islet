@@ -24,15 +24,20 @@ var (
 const localSessionTTL = 12 * time.Hour
 
 const (
-	SettingAutoApprove     = "users.auto_approve"
-	SettingRetentionDays   = "recycle.retention_days"
-	SettingPublicBaseURL   = "site.public_base_url"
-	SettingSiteTitle       = "site.title"
-	SettingUploadMaxBytes  = "upload.max_bytes"
-	SettingBrandName       = "brand.name"
-	SettingBrandLogo       = "brand.logo_url"
-	SettingBrandOIDCLabel  = "brand.oidc_label"
-	SettingBrandOIDCLogo   = "brand.oidc_logo_url"
+	SettingAutoApprove      = "users.auto_approve"
+	SettingRetentionDays    = "recycle.retention_days"
+	SettingPublicBaseURL    = "site.public_base_url"
+	SettingSiteTitle        = "site.title"
+	SettingUploadMaxBytes   = "upload.max_bytes"
+	SettingBrandName        = "brand.name"
+	SettingBrandLogo        = "brand.logo_url"
+	SettingBrandOIDCLabel   = "brand.oidc_label"
+	SettingBrandOIDCLogo    = "brand.oidc_logo_url"
+	SettingAuthOIDCIssuer   = "auth.oidc_issuer"
+	SettingAuthOIDCClientID = "auth.oidc_client_id"
+	SettingAuthOIDCAudience = "auth.oidc_audience"
+	SettingAuthOIDCScopes   = "auth.oidc_scopes"
+	SettingAuthLocalEnabled = "auth.local_enabled"
 )
 
 type AuthService struct {

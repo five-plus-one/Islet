@@ -41,7 +41,49 @@ func SettingDefaults() map[string]string {
 		SettingBrandLogo:      "",
 		SettingBrandOIDCLabel: "OIDC 登录",
 		SettingBrandOIDCLogo:  "",
+		// 认证相关：空值表示回落到配置文件/环境变量
+		SettingAuthOIDCIssuer:   "",
+		SettingAuthOIDCClientID: "",
+		SettingAuthOIDCAudience: "",
+		SettingAuthOIDCScopes:   "",
+		SettingAuthLocalEnabled: "true",
 	}
+}
+
+// EffectiveAuth 生效的认证配置：数据库（系统设置）优先，配置文件/环境变量兜底。
+type EffectiveAuth struct {
+	Issuer       string
+	ClientID     string
+	Audience     string
+	Scopes       string
+	LocalEnabled bool
+}
+
+// ResolveAuth 计算生效认证配置。settings 为 nil 时直接用文件配置。
+func ResolveAuth(settings *SettingsService, fallback EffectiveAuth) EffectiveAuth {
+	result := fallback
+	if result.Scopes == "" {
+		result.Scopes = "openid profile email"
+	}
+	result.LocalEnabled = true
+	if settings != nil {
+		if v := strings.TrimSpace(settings.Get(SettingAuthOIDCIssuer)); v != "" {
+			result.Issuer = v
+		}
+		if v := strings.TrimSpace(settings.Get(SettingAuthOIDCClientID)); v != "" {
+			result.ClientID = v
+		}
+		if v := strings.TrimSpace(settings.Get(SettingAuthOIDCAudience)); v != "" {
+			result.Audience = v
+		}
+		if v := strings.TrimSpace(settings.Get(SettingAuthOIDCScopes)); v != "" {
+			result.Scopes = v
+		}
+		if strings.TrimSpace(settings.Get(SettingAuthLocalEnabled)) == "false" {
+			result.LocalEnabled = false
+		}
+	}
+	return result
 }
 
 func (s *SettingsService) load() error {

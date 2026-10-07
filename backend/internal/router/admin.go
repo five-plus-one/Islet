@@ -332,6 +332,26 @@ func registerStatsRoutes(admin *gin.RouterGroup, deps *Deps) {
 
 // registerSettingsRoutes 站点设置（admin+）。
 func registerSettingsRoutes(admin *gin.RouterGroup, deps *Deps) {
+	admin.POST("/auth/test-oidc", func(c *gin.Context) {
+		var in struct {
+			Issuer string `json:"issuer"`
+		}
+		if err := c.ShouldBindJSON(&in); err != nil || strings.TrimSpace(in.Issuer) == "" {
+			response.BadRequest(c, "请填写 Issuer")
+			return
+		}
+		meta, err := deps.OIDC.Discover(c.Request.Context(), in.Issuer)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		response.OK(c, gin.H{
+			"issuer":                 meta.Issuer,
+			"authorization_endpoint": meta.AuthorizationEndpoint,
+			"token_endpoint":         meta.TokenEndpoint,
+			"jwks_uri":               meta.JWKSURI,
+		})
+	})
 	admin.GET("/settings", func(c *gin.Context) {
 		values, err := deps.Settings.All()
 		if err != nil {

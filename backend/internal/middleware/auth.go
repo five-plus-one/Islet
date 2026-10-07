@@ -33,16 +33,17 @@ type AuthUser struct {
 
 // Authenticator 聚合三种凭证解析：会话 Cookie、OIDC Bearer、API Token。
 type Authenticator struct {
-	cfg     func() config.Config
-	logger  *slog.Logger
-	db      *gorm.DB
-	oidc    *service.OIDCService
-	tokens  *service.APITokenService
-	authSvc *service.AuthService
+	cfg      func() config.Config
+	logger   *slog.Logger
+	db       *gorm.DB
+	oidc     *service.OIDCService
+	tokens   *service.APITokenService
+	authSvc  *service.AuthService
+	settings *service.SettingsService
 }
 
-func NewAuthenticator(cfg func() config.Config, logger *slog.Logger, db *gorm.DB, oidc *service.OIDCService, tokens *service.APITokenService) *Authenticator {
-	return &Authenticator{cfg: cfg, logger: logger, db: db, oidc: oidc, tokens: tokens, authSvc: service.NewAuthService(db)}
+func NewAuthenticator(cfg func() config.Config, logger *slog.Logger, db *gorm.DB, oidc *service.OIDCService, tokens *service.APITokenService, settings *service.SettingsService) *Authenticator {
+	return &Authenticator{cfg: cfg, logger: logger, db: db, oidc: oidc, tokens: tokens, authSvc: service.NewAuthService(db), settings: settings}
 }
 
 func (a *Authenticator) Middleware() gin.HandlerFunc {
@@ -80,20 +81,26 @@ func (a *Authenticator) fromBearer(c *gin.Context) (AuthUser, bool) {
 		return AuthUser{}, false
 	}
 	cfg := a.cfg()
+	// 生效认证配置：system_configs（系统设置页可改）优先，配置文件兜底
+	fallback := service.EffectiveAuth{
+		Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID,
+		Audience: cfg.OIDCAudience, Scopes: cfg.OIDCScopes,
+	}
+	auth := service.ResolveAuth(a.settings, fallback)
 
 	// 先按 OIDC access token 验（标准 Discovery + JWKS）
-	if cfg.AuthMode == model.AuthSourceOIDC && cfg.OIDCIssuer != "" {
-		audience := cfg.OIDCAudience
+	if auth.Issuer != "" && auth.ClientID != "" {
+		audience := auth.Audience
 		if audience == "" {
-			audience = cfg.OIDCClientID
+			audience = auth.ClientID
 		}
 		identity, err := a.oidc.Verify(c.Request.Context(), token, service.VerifyOptions{
-			Issuer: cfg.OIDCIssuer, Audience: audience,
+			Issuer: auth.Issuer, Audience: audience,
 		})
 		if err == nil {
 			if raw := c.GetHeader("X-OIDC-ID-Token"); raw != "" {
 				if profile, perr := a.oidc.Verify(c.Request.Context(), raw, service.VerifyOptions{
-					Issuer: cfg.OIDCIssuer, Audience: cfg.OIDCClientID,
+					Issuer: auth.Issuer, Audience: auth.ClientID,
 				}); perr == nil && profile.Subject == identity.Subject {
 					identity.Username = firstNonEmpty(profile.Username, identity.Username)
 					identity.Email = firstNonEmpty(profile.Email, identity.Email)

@@ -1,0 +1,29 @@
+# 外部已有 MySQL / Redis：只启动 Islet，连接信息在初始化向导中填写
+name: islet
+
+services:
+  islet:
+    image: 5plus1/islet:latest
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      HTTP_ADDR: :8080
+      ADMIN_HTTP_ADDR: :8081
+      CONFIG_FILE: /data/islet.json
+      # 仅作向导首屏默认值
+      SETUP_DEFAULT_MYSQL_HOST: ${SETUP_DEFAULT_MYSQL_HOST:-host.docker.internal}
+      SETUP_DEFAULT_REDIS_HOST: ${SETUP_DEFAULT_REDIS_HOST:-host.docker.internal}
+      TZ: Asia/Shanghai
+    ports:
+      - "${APP_PORT:-18090}:8080"
+      - "${ADMIN_PORT:-18091}:8081"
+    volumes:
+      - islet_data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  islet_data:

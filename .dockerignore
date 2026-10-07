@@ -1,0 +1,14 @@
+.git
+.github
+.claude
+.playwright-cli
+Docs
+site
+workspace
+backend/bin
+backend/data
+frontend/admin/node_modules
+frontend/admin/dist
+deploy/.env
+**/*.log
+**/*.key

@@ -1,0 +1,23 @@
+# 构建产物
+backend/bin/
+frontend/admin/dist/
+frontend/admin/node_modules/
+
+# 运行时数据
+backend/data/
+workspace/*.tmp
+workspace/*.log
+
+# 环境与密钥
+deploy/.env
+*.key
+*.env
+!deploy/.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 日志
+*.log

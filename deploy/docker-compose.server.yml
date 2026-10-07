@@ -1,0 +1,63 @@
+# 服务器部署：使用预构建镜像（先 docker push 5plus1/islet）
+name: islet
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-islet_root}
+      MYSQL_DATABASE: islet
+      MYSQL_USER: islet
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请设置 MYSQL_PASSWORD，见 .env.example}
+      TZ: Asia/Shanghai
+    ports:
+      - "${MYSQL_PORT:-13306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uislet -p$${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-16379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  islet:
+    image: 5plus1/islet:latest
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      HTTP_ADDR: :8080
+      ADMIN_HTTP_ADDR: :8081
+      CONFIG_FILE: /data/islet.json
+      SETUP_DEFAULT_MYSQL_HOST: mysql
+      SETUP_DEFAULT_REDIS_HOST: redis
+      TZ: Asia/Shanghai
+    ports:
+      - "${APP_PORT:-18090}:8080"
+      - "${ADMIN_PORT:-18091}:8081"
+    volumes:
+      - islet_data:/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
+  redis_data:
+  islet_data:

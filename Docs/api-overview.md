@@ -63,6 +63,17 @@ OIDC 连接信息支持两级来源：`system_configs`（系统设置页可改�
 
 ## 鉴权头
 
+工作台 `/api/v1` 使用交互式会话或 OIDC 身份；上传密钥只用于公网上传。`/api/admin` 额外要求管理员角色，创建本地用户、修改角色与重置系统等操作要求超级管理员。跨来源写请求被拒绝，API 响应禁止缓存。
+
+### 本地账户与图库
+
+- `POST /api/admin/users`：超级管理员创建本地账户，填写用户名、初始密码和分组。
+- `POST /api/v1/me/password`：校验当前密码后修改密码，同时撤销现有会话。密码长度为 10–72 字节。
+- `GET /api/v1/images`：默认查询本人；管理员显式传入 `scope=all` 才查询全站。分页使用创建时间和 ID 的组合游标，返回 `next_cursor` 和 `has_more`。
+- 图片编辑与回收操作校验所有权；相册必须属于图片所有者。永久删除只适用于回收中的图片。
+- `/api/v1/me` 提供允许使用的存储名称、公开站点地址及上传限制，存储凭据不下发给普通用户。
+- `GET /api/setup/status` 在安装完成后只读返回 `ready`。
+
 - 会话：`Cookie: islet_session=...`（管理端口本地登录）
 - OIDC：`Authorization: Bearer {access_token}`（+ 可选 `X-OIDC-ID-Token`）
 - API Token：`Authorization: Bearer isl_...`

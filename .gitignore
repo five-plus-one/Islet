@@ -7,6 +7,9 @@ frontend/admin/node_modules/
 backend/data/
 workspace/*.tmp
 workspace/*.log
+workspace/browser-results/
+workspace/screenshots/
+frontend/admin/test-results/
 
 # 环境与密钥
 deploy/.env

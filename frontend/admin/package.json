@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:e2e": "playwright test",
     "dev": "vite --host 127.0.0.1",
     "type-check": "vue-tsc --noEmit",
     "build": "vue-tsc --noEmit && vite build"
@@ -15,7 +16,9 @@
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "prettier": "^3.9.9",
     "typescript": "^5.7.2",
     "vite": "^6.0.7",
     "vue-tsc": "^2.2.0"

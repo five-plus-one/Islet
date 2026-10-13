@@ -56,8 +56,8 @@ func (s *AuthService) Installed() (bool, error) {
 }
 
 func HashPassword(password string) (string, error) {
-	if len(password) < 10 {
-		return "", errors.New("密码至少需要 10 位")
+	if len(password) < 10 || len(password) > 72 {
+		return "", errors.New("密码长度须为 10–72 字节")
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	return string(hash), err

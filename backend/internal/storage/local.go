@@ -50,12 +50,16 @@ func (d *Local) Put(_ context.Context, key string, r io.Reader, _ int64, _ strin
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return "", err
 	}
-	f, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	f, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
 	if _, err := io.Copy(f, r); err != nil {
+		_ = f.Close()
+		_ = os.Remove(target)
+		return "", err
+	}
+	if err := f.Close(); err != nil {
 		return "", err
 	}
 	return d.imageURL(key), nil

@@ -213,11 +213,11 @@ func (a *App) handleAdmin(c *gin.Context) {
 
 func (a *App) buildSetupEngine() *gin.Engine {
 	engine := gin.New()
-	engine.Use(gin.Recovery())
+	engine.Use(gin.Recovery(), middleware.RequestProtection())
 	deps := &router.Deps{
 		Cfg: a.cfg, Logger: a.logger,
-		OIDC: service.NewOIDCService(),
-		DataDir: a.cfg.DataDir,
+		OIDC:            service.NewOIDCService(),
+		DataDir:         a.cfg.DataDir,
 		OnSetupComplete: a.CompleteSetup,
 	}
 	router.RegisterSetupRoutes(engine, deps)

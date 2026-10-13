@@ -33,39 +33,39 @@ func NewPolicyService(db *gorm.DB, box *SecretBox, baseURL func() string, dataDi
 
 // PolicyView API 回传视图（永不回传 Secret）。
 type PolicyView struct {
-	ID              uint64 `json:"id"`
-	Name            string `json:"name"`
-	Driver          string `json:"driver"`
-	URLMode         string `json:"url_mode"`
-	Naming          string `json:"naming"`
-	IsDefault       bool   `json:"is_default"`
-	Status          string `json:"status"`
-	Endpoint        string `json:"endpoint,omitempty"`
-	Region          string `json:"region,omitempty"`
-	Bucket          string `json:"bucket,omitempty"`
-	Prefix          string `json:"prefix,omitempty"`
-	CDN             string `json:"cdn,omitempty"`
-	AccessKey       string `json:"access_key,omitempty"`
-	PathStyle       bool   `json:"path_style,omitempty"`
-	SecretConfigured bool  `json:"secret_configured"`
+	ID               uint64 `json:"id"`
+	Name             string `json:"name"`
+	Driver           string `json:"driver"`
+	URLMode          string `json:"url_mode"`
+	Naming           string `json:"naming"`
+	IsDefault        bool   `json:"is_default"`
+	Status           string `json:"status"`
+	Endpoint         string `json:"endpoint,omitempty"`
+	Region           string `json:"region,omitempty"`
+	Bucket           string `json:"bucket,omitempty"`
+	Prefix           string `json:"prefix,omitempty"`
+	CDN              string `json:"cdn,omitempty"`
+	AccessKey        string `json:"access_key,omitempty"`
+	PathStyle        bool   `json:"path_style,omitempty"`
+	SecretConfigured bool   `json:"secret_configured"`
 }
 
 type PolicyInput struct {
-	ID        uint64  `json:"id"`
-	Name      string  `json:"name"`
-	Driver    string  `json:"driver"`
-	URLMode   string  `json:"url_mode"`
-	Naming    string  `json:"naming"`
-	IsDefault bool    `json:"is_default"`
-	Status    string  `json:"status"`
-	Endpoint  string  `json:"endpoint"`
-	Region    string  `json:"region"`
-	Bucket    string  `json:"bucket"`
-	Prefix    string  `json:"prefix"`
-	CDN       string  `json:"cdn"`
-	AccessKey string  `json:"access_key"`
-	SecretKey string  `json:"secret_key"`
-	PathStyle bool    `json:"path_style"`
+	ID        uint64 `json:"id"`
+	Name      string `json:"name"`
+	Driver    string `json:"driver"`
+	URLMode   string `json:"url_mode"`
+	Naming    string `json:"naming"`
+	IsDefault bool   `json:"is_default"`
+	Status    string `json:"status"`
+	Endpoint  string `json:"endpoint"`
+	Region    string `json:"region"`
+	Bucket    string `json:"bucket"`
+	Prefix    string `json:"prefix"`
+	CDN       string `json:"cdn"`
+	AccessKey string `json:"access_key"`
+	SecretKey string `json:"secret_key"`
+	PathStyle bool   `json:"path_style"`
 }
 
 func (s *PolicyService) decryptConfig(policy model.StoragePolicy) (S3Payload, error) {
@@ -218,6 +218,24 @@ func (s *PolicyService) Update(id uint64, in PolicyInput) (PolicyView, error) {
 		driver = in.Driver
 	}
 	sealed := policy.Config
+	var references int64
+	if err := s.db.Unscoped().Model(&model.Image{}).Where("policy_id = ?", id).Count(&references).Error; err != nil {
+		return PolicyView{}, err
+	}
+	if references > 0 {
+		if driver != policy.Driver {
+			return PolicyView{}, errors.New("已有图片使用此策略，请创建新的存储策略")
+		}
+		if driver == model.PolicyDriverS3 {
+			old, err := s.decryptConfig(policy)
+			if err != nil {
+				return PolicyView{}, err
+			}
+			if strings.TrimSpace(in.Endpoint) != old.Endpoint || strings.TrimSpace(in.Bucket) != old.Bucket || strings.TrimSpace(in.Prefix) != old.Prefix {
+				return PolicyView{}, errors.New("已有图片使用此存储位置，请创建新的存储策略")
+			}
+		}
+	}
 	if driver == model.PolicyDriverS3 {
 		old, oldErr := s.decryptConfig(policy)
 		if oldErr != nil && strings.TrimSpace(in.SecretKey) == "" {
@@ -259,7 +277,7 @@ func (s *PolicyService) Delete(id uint64) error {
 		return errors.New("内置本地存储策略不可删除")
 	}
 	var count int64
-	if err := s.db.Model(&model.Image{}).Where("policy_id = ?", id).Count(&count).Error; err != nil {
+	if err := s.db.Unscoped().Model(&model.Image{}).Where("policy_id = ?", id).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
@@ -279,11 +297,20 @@ func (s *PolicyService) DefaultPolicyID() (uint64, error) {
 
 // Driver 构造策略驱动。status=false 的策略不可用。
 func (s *PolicyService) Driver(id uint64) (storage.Driver, model.StoragePolicy, error) {
+	return s.driver(id, true)
+}
+
+// Existing objects remain accessible when new uploads are disabled.
+func (s *PolicyService) ReadDriver(id uint64) (storage.Driver, model.StoragePolicy, error) {
+	return s.driver(id, false)
+}
+
+func (s *PolicyService) driver(id uint64, activeOnly bool) (storage.Driver, model.StoragePolicy, error) {
 	var policy model.StoragePolicy
 	if err := s.db.First(&policy, id).Error; err != nil {
 		return nil, policy, ErrPolicyNotFound
 	}
-	if policy.Status != model.StatusActive {
+	if activeOnly && policy.Status != model.StatusActive {
 		return nil, policy, errors.New("存储策略已停用")
 	}
 	switch policy.Driver {
@@ -298,6 +325,7 @@ func (s *PolicyService) Driver(id uint64) (storage.Driver, model.StoragePolicy, 
 		if err != nil {
 			return nil, policy, err
 		}
+		driver.SetProxy(policy.URLMode == model.PolicyURLProxy || payload.CDN == "")
 		return driver, policy, nil
 	}
 }

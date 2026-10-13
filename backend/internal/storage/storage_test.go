@@ -29,6 +29,9 @@ func TestLocalDriverRoundTrip(t *testing.T) {
 	if url != base+"/i/2026/01/02/test.png" {
 		t.Fatalf("unexpected url: %s", url)
 	}
+	if _, err := driver.Put(nil, "2026/01/02/test.png", strings.NewReader("replacement"), 11, "image/png"); err == nil {
+		t.Fatal("an existing image must not be overwritten")
+	}
 	rc, size, err := driver.Read(nil, "2026/01/02/test.png")
 	if err != nil || size != 5 {
 		t.Fatalf("read failed: %v %d", err, size)

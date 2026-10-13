@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,9 +20,9 @@ var ErrSettingValue = errors.New("设置值过长")
 type SettingsService struct {
 	db *gorm.DB
 
-	mu      sync.RWMutex
-	cache   map[string]string
-	loaded  bool
+	mu       sync.RWMutex
+	cache    map[string]string
+	loaded   bool
 	loadedAt time.Time
 }
 
@@ -148,6 +149,32 @@ func (s *SettingsService) GetInt64(key string, fallback int64) int64 {
 
 // Put 白名单内的键批量 upsert，随后失效缓存。
 func (s *SettingsService) Put(values map[string]string) error {
+	for key, value := range values {
+		value = strings.TrimSpace(value)
+		switch key {
+		case SettingUploadMaxBytes:
+			n, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || n < 1<<20 || n > 100<<20 {
+				return errors.New("单文件上限须为 1–100 MB")
+			}
+		case SettingRetentionDays:
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 0 || n > 3650 {
+				return errors.New("保留时间须为 0–3650 天")
+			}
+		case SettingAuthLocalEnabled, SettingAutoApprove:
+			if value != "true" && value != "false" {
+				return errors.New("开关设置不合法")
+			}
+		case SettingPublicBaseURL, SettingAuthOIDCIssuer, SettingBrandLogo, SettingBrandOIDCLogo:
+			if value != "" {
+				u, err := url.Parse(value)
+				if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Fragment != "" || (key == SettingPublicBaseURL && u.RawQuery != "") {
+					return errors.New("请填写完整的 http 或 https 地址")
+				}
+			}
+		}
+	}
 	allowed := SettingDefaults()
 	rows := make([]model.SystemConfig, 0, len(values))
 	for key, value := range values {

@@ -32,11 +32,14 @@ type S3Config struct {
 type S3 struct {
 	cfg   S3Config
 	base  func() string // site.public_base_url（proxy 模式 URL 用）
+	proxy bool
 }
 
 func NewS3(cfg S3Config, baseURL func() string) *S3 {
 	return &S3{cfg: normalizeS3(cfg), base: baseURL}
 }
+
+func (d *S3) SetProxy(proxy bool) { d.proxy = proxy }
 
 func normalizeS3(c S3Config) S3Config {
 	c.Endpoint = strings.TrimRight(strings.TrimSpace(c.Endpoint), "/")
@@ -128,8 +131,9 @@ func (d *S3) Put(ctx context.Context, key string, r io.Reader, size int64, conte
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	_, err = client.PutObject(ctx, d.cfg.Bucket, d.objectKey(key), r, size,
-		minio.PutObjectOptions{ContentType: contentType, DisableMultipart: true, DisableContentSha256: true, SendContentMd5: true})
+	options := minio.PutObjectOptions{ContentType: contentType, DisableMultipart: true, DisableContentSha256: true, SendContentMd5: true}
+	options.SetMatchETagExcept("*")
+	_, err = client.PutObject(ctx, d.cfg.Bucket, d.objectKey(key), r, size, options)
 	if err != nil {
 		return "", TranslateError(err)
 	}
@@ -150,7 +154,7 @@ func (d *S3) Delete(ctx context.Context, key string) error {
 }
 
 func (d *S3) Access() AccessMode {
-	if d.cfg.CDN != "" {
+	if !d.proxy {
 		return AccessRedirect
 	}
 	return AccessProxy
@@ -173,16 +177,15 @@ func (d *S3) Read(ctx context.Context, key string) (io.ReadCloser, int64, error)
 		cancel()
 		return nil, 0, TranslateError(err)
 	}
-	// cancel 在流关闭后生效；此处不持有 —— 返回给调用方延迟取消
-	go func() {
-		select {
-		case <-ctx.Done():
-		case <-time.After(5 * time.Minute):
-			cancel()
-		}
-	}()
-	return obj, stat.Size, nil
+	return &cancelReader{ReadCloser: obj, cancel: cancel}, stat.Size, nil
 }
+
+type cancelReader struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (r *cancelReader) Close() error { defer r.cancel(); return r.ReadCloser.Close() }
 
 func (d *S3) RedirectURL(key string) string {
 	return d.publicURL(key)
@@ -190,6 +193,13 @@ func (d *S3) RedirectURL(key string) string {
 
 // publicURL 固化到图片记录的直链：CDN 优先，否则 endpoint + bucket。
 func (d *S3) publicURL(key string) string {
+	if d.proxy {
+		base := ""
+		if d.base != nil {
+			base = strings.TrimRight(d.base(), "/")
+		}
+		return base + "/i/" + key
+	}
 	if d.cfg.CDN != "" {
 		return d.cfg.CDN + "/" + d.objectKey(key)
 	}
@@ -226,7 +236,9 @@ func (d *S3) Check(ctx context.Context) error {
 		minio.PutObjectOptions{ContentType: "image/png", DisableMultipart: true, DisableContentSha256: true, SendContentMd5: true}); err != nil {
 		return TranslateError(err)
 	}
-	_ = client.RemoveObject(ctx, d.cfg.Bucket, d.objectKey(name), minio.RemoveObjectOptions{})
+	if err := client.RemoveObject(ctx, d.cfg.Bucket, d.objectKey(name), minio.RemoveObjectOptions{}); err != nil {
+		return TranslateError(err)
+	}
 	return nil
 }
 
@@ -242,6 +254,8 @@ func probeName() string {
 func TranslateError(err error) error {
 	r := minio.ToErrorResponse(err)
 	switch r.Code {
+	case "PreconditionFailed":
+		return errorsNew("文件名已被使用，请重新上传")
 	case "NoSuchBucket":
 		return errorsNew("存储桶不存在，请检查 Bucket 名称和地域")
 	case "InvalidAccessKeyId":

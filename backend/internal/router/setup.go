@@ -55,11 +55,11 @@ func registerSetupRoutes(setup *gin.RouterGroup, deps *Deps) {
 }
 
 type setupStatusPayload struct {
-	Status       string `json:"status"`
-	AuthMode     string `json:"auth_mode"`
-	Verified     bool   `json:"admin_verified"`
-	Defaults     map[string]string `json:"defaults"`
-	AuthConfig   authConfigPayload `json:"auth_config"`
+	Status     string            `json:"status"`
+	AuthMode   string            `json:"auth_mode"`
+	Verified   bool              `json:"admin_verified"`
+	Defaults   map[string]string `json:"defaults"`
+	AuthConfig authConfigPayload `json:"auth_config"`
 }
 
 func handleSetupStatus(c *gin.Context) {
@@ -113,10 +113,13 @@ func handleSetupTestDatabase(c *gin.Context) {
 	mysqlErr := ""
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
 		in.MySQLUser, in.MySQLPassword, in.MySQLHost, in.MySQLPort, in.MySQLDatabase)
-	if _, err := database.ConnectMySQL(dsn); err != nil {
+	if db, err := database.ConnectMySQL(dsn); err != nil {
 		mysqlErr = err.Error()
 	} else {
 		result["mysql"] = true
+		if pool, err := db.DB(); err == nil {
+			_ = pool.Close()
+		}
 	}
 	redisErr := ""
 	if in.RedisHost != "" {
@@ -124,10 +127,11 @@ func handleSetupTestDatabase(c *gin.Context) {
 			in.RedisPort = "6379"
 		}
 		addr := in.RedisHost + ":" + in.RedisPort
-		if _, err := database.ConnectRedis(addr, in.RedisPassword, in.RedisDB); err != nil {
+		if client, err := database.ConnectRedis(addr, in.RedisPassword, in.RedisDB); err != nil {
 			redisErr = err.Error()
 		} else {
 			result["redis"] = true
+			_ = client.Close()
 		}
 	} else {
 		result["redis"] = true // Redis 未填视为可选项跳过（上传限流降级）
@@ -308,23 +312,15 @@ func handleSetupComplete(c *gin.Context) {
 		response.BadRequest(c, "请先完成管理员身份验证")
 		return
 	}
-	cfg.InstallationComplete = true
-	cfg.ResetPending = false
-	if err := config.SaveFile(cfg.ConfigFile, cfg); err != nil {
-		response.ServerError(c, "写入配置失败："+err.Error())
-		return
-	}
-	if err := config.ClearResetMarker(cfg.ConfigFile); err != nil {
-		response.ServerError(c, "清理状态失败："+err.Error())
-		return
-	}
-
 	db, err := database.ConnectMySQL(cfg.DSN())
 	if err != nil {
 		cfg.InstallationComplete = false
 		_ = config.SaveFile(cfg.ConfigFile, cfg)
 		response.BadRequest(c, "MySQL 连接失败："+err.Error())
 		return
+	}
+	if pool, err := db.DB(); err == nil {
+		defer pool.Close()
 	}
 	if err := database.Migrate(db); err != nil {
 		response.ServerError(c, "数据库迁移失败："+err.Error())
@@ -351,7 +347,10 @@ func handleSetupComplete(c *gin.Context) {
 		values[service.SettingPublicBaseURL] = strings.TrimRight(strings.TrimSpace(in.PublicBaseURL), "/")
 	}
 	if len(values) > 0 {
-		_ = settings.Put(values)
+		if err := settings.Put(values); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
 	}
 
 	// 清理配置文件中的临时凭据
@@ -360,7 +359,16 @@ func handleSetupComplete(c *gin.Context) {
 	cfg.BootstrapUsername = ""
 	cfg.BootstrapEmail = ""
 	cfg.BootstrapPassword = ""
-	_ = config.SaveFile(cfg.ConfigFile, cfg)
+	cfg.InstallationComplete = true
+	cfg.ResetPending = false
+	if err := config.SaveFile(cfg.ConfigFile, cfg); err != nil {
+		response.ServerError(c, "保存配置失败，请重试")
+		return
+	}
+	if err := config.ClearResetMarker(cfg.ConfigFile); err != nil {
+		response.ServerError(c, "更新初始化状态失败，请重试")
+		return
+	}
 
 	// 热启用业务（失败不影响初始化结果，重启后自愈）
 	if deps := setupDeps(c); deps != nil && deps.OnSetupComplete != nil {
@@ -537,7 +545,11 @@ func registerAuthRoutes(api *gin.RouterGroup, deps *Deps) {
 		})
 	})
 
-	api.POST("/auth/local/login", func(c *gin.Context) {
+	api.POST("/auth/local/login", localLoginLimit(), func(c *gin.Context) {
+		if !deps.Settings.GetBool(service.SettingAuthLocalEnabled, true) {
+			response.Forbidden(c, "本地登录已关闭，请使用统一登录")
+			return
+		}
 		var input struct {
 			Username string `json:"username" binding:"required"`
 			Password string `json:"password" binding:"required"`

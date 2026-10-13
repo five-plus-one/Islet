@@ -16,6 +16,7 @@ import (
 // all: 前缀不可省略：默认 embed 会排除 _ 和 . 开头的文件，
 // 而 Vite 产物中存在 _plugin-vue_export-helper-*.js 这类下划线开头的 chunk。
 // /assets/ 下缺失的文件显式 404，不能回退 index.html（模块加载器会因 MIME 拒绝）。
+//
 //go:embed all:admin
 var adminFS embed.FS
 
@@ -27,6 +28,11 @@ func RegisterAdminSPA(engine *gin.Engine) {
 		return
 	}
 	serve := func(c *gin.Context, name string) {
+		if name == "index.html" {
+			c.Header("Cache-Control", "no-store")
+		} else {
+			c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		}
 		data, err := fs.ReadFile(sub, name)
 		if err != nil {
 			response.NotFound(c, "not found")

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -100,9 +101,16 @@ func (s *GroupService) Update(id uint64, in GroupInput) (model.UserGroup, error)
 	updates := map[string]any{
 		"name": name, "description": strings.TrimSpace(in.Description),
 		"quota_bytes": in.QuotaBytes, "max_file_bytes": in.MaxFileBytes,
-		"allowed_mimes": normalizeMimes(in.AllowedMimes), "policy_ids": in.PolicyIDs,
 		"uploads_per_hour": in.UploadsPerHour,
 	}
+	mimes, _ := json.Marshal(normalizeMimes(in.AllowedMimes))
+	ids := in.PolicyIDs
+	if ids == nil {
+		ids = []uint64{}
+	}
+	policyIDs, _ := json.Marshal(ids)
+	updates["allowed_mimes"] = string(mimes)
+	updates["policy_ids"] = string(policyIDs)
 	if in.Status == model.StatusActive || in.Status == model.StatusDisabled {
 		updates["status"] = in.Status
 	}
@@ -130,7 +138,7 @@ func (s *GroupService) Delete(id uint64) error {
 	return s.db.Delete(&group).Error
 }
 
-//mimeAllowed 校验 mime 是否命中白名单（支持 image/* 通配；空白名单=不限）。
+// mimeAllowed 校验 mime 是否命中白名单（支持 image/* 通配；空白名单=不限）。
 func mimeAllowed(allowed []string, mime string) bool {
 	if len(allowed) == 0 {
 		return strings.HasPrefix(mime, "image/")

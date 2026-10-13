@@ -179,6 +179,19 @@ func RequireSuperAdmin() gin.HandlerFunc {
 	return RequireRole(model.UserRoleSuperAdmin)
 }
 
+// RequireInteractive keeps upload credentials out of account and administration APIs.
+func RequireInteractive() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user, ok := CurrentUser(c)
+		if !ok || user.ViaToken {
+			response.Forbidden(c, "上传密钥仅可用于上传图片")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 func bearerToken(header string) string {
 	const prefix = "Bearer "
 	if !strings.HasPrefix(header, prefix) {

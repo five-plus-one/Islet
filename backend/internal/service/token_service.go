@@ -87,7 +87,7 @@ func (s *APITokenService) List(userID uint64) ([]TokenView, error) {
 }
 
 func (s *APITokenService) Revoke(userID, id uint64) error {
-	result := s.db.Where("id = ? AND user_id = ?", id, userID).Update("status", "disabled")
+	result := s.db.Model(&model.APIToken{}).Where("id = ? AND user_id = ?", id, userID).Update("status", model.StatusDisabled)
 	if result.Error != nil {
 		return result.Error
 	}

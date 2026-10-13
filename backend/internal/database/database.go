@@ -3,6 +3,8 @@ package database
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -16,7 +18,7 @@ import (
 // ConnectMySQL 打开连接并做带超时的 Ping 探测（初始化向导与启动自检共用）。
 func ConnectMySQL(dsn string) (*gorm.DB, error) {
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+		Logger: logger.New(log.New(os.Stderr, "", log.LstdFlags), logger.Config{LogLevel: logger.Warn, ParameterizedQueries: true, IgnoreRecordNotFoundError: true, SlowThreshold: time.Second}),
 	})
 	if err != nil {
 		return nil, err

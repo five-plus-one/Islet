@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"islet/backend/internal/model"
 )
@@ -28,35 +29,37 @@ func NewImageService(db *gorm.DB, policies *PolicyService) *ImageService {
 }
 
 type ImageQuery struct {
-	UserID    uint64 // 0=不限（管理员视角）
-	AlbumID   *uint64
-	Tag       string
-	Mime      string
-	Keyword   string
-	Recycled  bool
-	Before    *time.Time // 游标分页：早于此时间
-	Limit     int
+	UserID   uint64 // 0=不限（管理员视角）
+	AlbumID  *uint64
+	Tag      string
+	Mime     string
+	Keyword  string
+	Recycled bool
+	Before   *time.Time // 游标分页：早于此时间
+	BeforeID uint64
+	Limit    int
 }
 
 type ImageItem struct {
-	ID           uint64    `json:"id"`
-	UserID       uint64    `json:"user_id"`
-	Username     string    `json:"username,omitempty"`
-	PolicyID     uint64    `json:"policy_id"`
-	AlbumID      *uint64   `json:"album_id"`
-	URL          string    `json:"url"`
-	ThumbURL     string    `json:"thumb_url"`
-	OriginalName string    `json:"original_name"`
-	Mime         string    `json:"mime"`
-	Size         uint64    `json:"size"`
-	Width        int       `json:"width"`
-	Height       int       `json:"height"`
-	Tags         []string  `json:"tags"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           uint64     `json:"id"`
+	UserID       uint64     `json:"user_id"`
+	Username     string     `json:"username,omitempty"`
+	PolicyID     uint64     `json:"policy_id"`
+	AlbumID      *uint64    `json:"album_id"`
+	URL          string     `json:"url"`
+	ThumbURL     string     `json:"thumb_url"`
+	OriginalName string     `json:"original_name"`
+	Mime         string     `json:"mime"`
+	Size         uint64     `json:"size"`
+	Width        int        `json:"width"`
+	Height       int        `json:"height"`
+	Tags         []string   `json:"tags"`
+	CreatedAt    time.Time  `json:"created_at"`
 	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
 }
 
-func (s *ImageService) item(i model.Image, username string) ImageItem {	result := ImageItem{
+func (s *ImageService) item(i model.Image, username string) ImageItem {
+	result := ImageItem{
 		ID: i.ID, UserID: i.UserID, Username: username, PolicyID: i.PolicyID,
 		AlbumID: i.AlbumID, URL: i.URL, OriginalName: i.OriginalName,
 		Mime: i.Mime, Size: i.Size, Width: i.Width, Height: i.Height,
@@ -64,6 +67,9 @@ func (s *ImageService) item(i model.Image, username string) ImageItem {	result :
 	}
 	if i.ThumbURL != nil && *i.ThumbURL != "" {
 		result.ThumbURL = *i.ThumbURL
+		if strings.Contains(i.URL, "/i/"+i.StorageKey) {
+			result.ThumbURL = strings.Replace(i.URL, "/i/"+i.StorageKey, "/t/"+i.StorageKey, 1)
+		}
 	} else {
 		result.ThumbURL = i.URL
 	}
@@ -78,7 +84,7 @@ func (s *ImageService) item(i model.Image, username string) ImageItem {	result :
 }
 
 func (s *ImageService) List(q ImageQuery) ([]ImageItem, error) {
-	if q.Limit <= 0 || q.Limit > 100 {
+	if q.Limit <= 0 || q.Limit > 101 {
 		q.Limit = 50
 	}
 	tx := s.db.Model(&model.Image{})
@@ -104,10 +110,14 @@ func (s *ImageService) List(q ImageQuery) ([]ImageItem, error) {
 		tx = tx.Where("original_name LIKE ? OR url LIKE ?", like, like)
 	}
 	if q.Before != nil {
-		tx = tx.Where("created_at < ?", *q.Before)
+		if q.BeforeID > 0 {
+			tx = tx.Where("(created_at < ? OR (created_at = ? AND id < ?))", *q.Before, *q.Before, q.BeforeID)
+		} else {
+			tx = tx.Where("created_at < ?", *q.Before)
+		}
 	}
 	var rows []model.Image
-	if err := tx.Order("images.created_at DESC").Limit(q.Limit).Find(&rows).Error; err != nil {
+	if err := tx.Order("images.created_at DESC, images.id DESC").Limit(q.Limit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	usernames := s.usernameMap(rows)
@@ -197,7 +207,7 @@ func (s *ImageService) Update(id, userID uint64, isSuper bool, in ImageUpdate) (
 		if err := s.db.First(&album, *in.AlbumID).Error; err != nil {
 			return image, ErrAlbumNotFound
 		}
-		if !isSuper && album.UserID != userID {
+		if album.UserID != image.UserID {
 			return image, ErrAlbumNotFound
 		}
 		updates["album_id"] = *in.AlbumID
@@ -205,7 +215,11 @@ func (s *ImageService) Update(id, userID uint64, isSuper bool, in ImageUpdate) (
 		updates["album_id"] = nil
 	}
 	if in.Tags != nil {
-		updates["tags"] = normalizeTags(*in.Tags)
+		raw, err := json.Marshal(normalizeTags(*in.Tags))
+		if err != nil {
+			return image, err
+		}
+		updates["tags"] = string(raw)
 	}
 	if len(updates) > 0 {
 		if err := s.db.Model(&image).Updates(updates).Error; err != nil {
@@ -240,6 +254,17 @@ func (s *ImageService) Restore(id, userID uint64, isSuper bool, checkQuota func(
 		if !isSuper && image.UserID != userID {
 			return ErrImageNotFound
 		}
+		var owner model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&owner, image.UserID).Error; err != nil {
+			return err
+		}
+		// Lock the image after its owner so concurrent restores cannot count the same image twice.
+		if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).First(&image, id).Error; err != nil {
+			return err
+		}
+		if !image.DeletedAt.Valid {
+			return errors.New("图片已恢复")
+		}
 		if checkQuota != nil {
 			if err := checkQuota(image.UserID, image.Size); err != nil {
 				return err
@@ -253,20 +278,27 @@ func (s *ImageService) Restore(id, userID uint64, isSuper bool, checkQuota func(
 func (s *ImageService) Purge(ctx context.Context, id, userID uint64, isSuper bool) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		var image model.Image
-		if err := tx.Unscoped().First(&image, id).Error; err != nil {
+		if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).First(&image, id).Error; err != nil {
 			return ErrImageNotFound
 		}
 		if !isSuper && image.UserID != userID {
 			return ErrImageNotFound
 		}
-		driver, _, err := s.policies.Driver(image.PolicyID)
-		if err == nil {
-			_ = driver.Delete(ctx, image.StorageKey)
-			if image.ThumbKey != nil {
-				_ = driver.Delete(ctx, *image.ThumbKey)
+		if !image.DeletedAt.Valid {
+			return errors.New("请先将图片移入回收站")
+		}
+		driver, _, err := s.policies.ReadDriver(image.PolicyID)
+		if err != nil {
+			return errors.New("暂时无法连接存储，请检查存储策略后重试")
+		}
+		if err := driver.Delete(ctx, image.StorageKey); err != nil {
+			return errors.New("原图删除失败，请稍后重试")
+		}
+		if image.ThumbKey != nil {
+			if err := driver.Delete(ctx, *image.ThumbKey); err != nil {
+				return errors.New("缩略图删除失败，请稍后重试")
 			}
 		}
-		// 存储删除失败也继续删记录（孤儿对象由清理策略兜底）
 		return tx.Unscoped().Delete(&image).Error
 	})
 }
@@ -345,11 +377,11 @@ func (s *AlbumService) Delete(userID uint64, id uint64) error {
 		return ErrAlbumNotFound
 	}
 	var count int64
-	if err := s.db.Model(&model.Image{}).Where("album_id = ? AND deleted_at IS NULL", id).Count(&count).Error; err != nil {
+	if err := s.db.Unscoped().Model(&model.Image{}).Where("album_id = ?", id).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
-		return errors.New("相册内仍有图片，请先移出")
+		return errors.New("相册内仍有图片（含回收站），请先移出或清理")
 	}
 	return s.db.Delete(&album).Error
 }

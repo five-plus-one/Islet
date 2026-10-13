@@ -1,9 +1,7 @@
 package router
 
 import (
-	"bytes"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 
@@ -48,7 +46,7 @@ func serveImage(c *gin.Context, deps *Deps, rawKey string, thumb bool) {
 			targetKey = *image.ThumbKey
 		}
 	}
-	driver, _, err := deps.Policies.Driver(image.PolicyID)
+	driver, _, err := deps.Policies.ReadDriver(image.PolicyID)
 	if err != nil {
 		c.String(http.StatusNotFound, "policy unavailable")
 		return
@@ -117,6 +115,15 @@ func registerPublicUpload(api *gin.RouterGroup, deps *Deps) {
 // handleUpload 上传共享逻辑（Web 与 API 同链路）。
 func handleUpload(c *gin.Context, deps *Deps, user middleware.AuthUser) {
 	maxBytes := deps.Settings.GetInt64(service.SettingUploadMaxBytes, 100<<20)
+	if maxBytes <= 0 || maxBytes > 100<<20 {
+		maxBytes = 100 << 20
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes*30+(1<<20))
+	defer func() {
+		if c.Request.MultipartForm != nil {
+			_ = c.Request.MultipartForm.RemoveAll()
+		}
+	}()
 	files, err := service.ParseUploadForm(c, maxBytes)
 	if err != nil {
 		uploadError(c, err)
@@ -140,23 +147,17 @@ func handleUpload(c *gin.Context, deps *Deps, user middleware.AuthUser) {
 			firstErr = err
 			break
 		}
-		var buf bytes.Buffer
-		_, copyErr := io.Copy(&buf, f)
-		_ = f.Close()
-		if copyErr != nil {
-			firstErr = copyErr
-			break
-		}
 		result, err := deps.Uploads.Upload(c.Request.Context(), service.UploadInput{
 			UserID:   user.ID,
 			GroupID:  user.GroupID,
 			IsSuper:  user.Role == model.UserRoleSuperAdmin,
 			FileName: header.Filename,
-			Content:  &buf,
+			Content:  f,
 			PolicyID: policyID,
 			AlbumID:  albumPtr,
 			Tags:     tags,
 		})
+		_ = f.Close()
 		if err != nil {
 			firstErr = err
 			break

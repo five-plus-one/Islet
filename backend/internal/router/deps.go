@@ -9,6 +9,7 @@ import (
 
 	"islet/backend/internal/config"
 	"islet/backend/internal/middleware"
+	"islet/backend/internal/model"
 	"islet/backend/internal/service"
 	"islet/backend/internal/web"
 )
@@ -41,7 +42,8 @@ type Deps struct {
 // BuildPublicEngine 公网端口：图片访问 /i /t、Token 上传、健康检查。
 func BuildPublicEngine(deps *Deps) *gin.Engine {
 	engine := gin.New()
-	engine.Use(gin.Recovery())
+	engine.Use(gin.Recovery(), middleware.RequestProtection())
+	_ = engine.SetTrustedProxies([]string{"127.0.0.1", "::1"})
 	api := engine.Group("/api/v1")
 	registerHealthRoutes(api)
 	registerPublicUpload(api, deps)
@@ -52,22 +54,24 @@ func BuildPublicEngine(deps *Deps) *gin.Engine {
 // BuildAdminEngine 管理端口：SPA、业务 API、管理 API。
 func BuildAdminEngine(deps *Deps) *gin.Engine {
 	engine := gin.New()
-	engine.Use(gin.Recovery())
+	engine.Use(gin.Recovery(), middleware.RequestProtection())
+	_ = engine.SetTrustedProxies([]string{"127.0.0.1", "::1"})
 
 	api := engine.Group("/api/v1")
+	engine.GET("/api/setup/status", func(c *gin.Context) { c.JSON(200, gin.H{"code": 0, "message": "ok", "data": gin.H{"status": "ready"}}) })
 	registerHealthRoutes(api)
 	RegisterAuthConfigRoute(engine, deps)
 	registerAuthRoutes(api, deps)
 	registerPublicUpload(api, deps)
 
 	user := api.Group("")
-	user.Use(deps.Authenticator.Middleware())
+	user.Use(deps.Authenticator.Middleware(), middleware.RequireInteractive())
 	registerMeRoutes(user, deps)
 	registerImageManageRoutes(user, deps)
 	registerAlbumRoutes(user, deps)
 
 	admin := engine.Group("/api/admin")
-	admin.Use(deps.Authenticator.Middleware())
+	admin.Use(deps.Authenticator.Middleware(), middleware.RequireInteractive(), middleware.RequireRole(model.UserRoleAdmin))
 	registerPolicyRoutes(admin, deps)
 	registerGroupRoutes(admin, deps)
 	registerUserRoutes(admin, deps)

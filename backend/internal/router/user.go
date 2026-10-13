@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"islet/backend/internal/middleware"
 	"islet/backend/internal/model"
@@ -17,6 +18,40 @@ import (
 
 // registerMeRoutes 个人资料与配额、API Token 管理。
 func registerMeRoutes(group *gin.RouterGroup, deps *Deps) {
+	group.POST("/me/password", func(c *gin.Context) {
+		user, _ := middleware.CurrentUser(c)
+		if user.AuthSource != model.AuthSourceLocal {
+			response.Forbidden(c, "请在统一登录服务中修改密码")
+			return
+		}
+		var in struct {
+			Current  string `json:"current_password"`
+			Password string `json:"password"`
+		}
+		if c.ShouldBindJSON(&in) != nil {
+			response.BadRequest(c, "请填写当前密码和新密码")
+			return
+		}
+		if err := deps.Auth.VerifyLocalPassword(user.ID, in.Current); err != nil {
+			response.Forbidden(c, "当前密码不正确")
+			return
+		}
+		hash, err := service.HashPassword(in.Password)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		if err := deps.DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.User{}).Where("id = ?", user.ID).Update("password_hash", hash).Error; err != nil {
+				return err
+			}
+			return tx.Where("user_id = ?", user.ID).Delete(&model.AuthSession{}).Error
+		}); err != nil {
+			response.ServerError(c, "修改密码失败")
+			return
+		}
+		response.OK(c, gin.H{"updated": true})
+	})
 	group.GET("/me", func(c *gin.Context) {
 		user, _ := middleware.CurrentUser(c)
 		quota, used := meQuota(deps, user)
@@ -29,10 +64,26 @@ func registerMeRoutes(group *gin.RouterGroup, deps *Deps) {
 			}
 		}
 		availablePolicies, _ := deps.Policies.List()
+		allowed := []gin.H{}
+		g, _ := deps.Groups.Get(user.GroupID)
+		for _, p := range availablePolicies {
+			permitted := user.Role == model.UserRoleSuperAdmin || len(g.PolicyIDs) == 0
+			for _, id := range g.PolicyIDs {
+				if id == p.ID {
+					permitted = true
+				}
+			}
+			if permitted && p.Status == model.StatusActive {
+				allowed = append(allowed, gin.H{"id": p.ID, "name": p.Name, "driver": p.Driver, "is_default": p.IsDefault})
+			}
+		}
 		response.OK(c, gin.H{
 			"user": user, "group": groupInfo,
-			"quota": gin.H{"limit": quota, "used": used},
-			"policies": availablePolicies,
+			"quota":            gin.H{"limit": quota, "used": used},
+			"policies":         allowed,
+			"public_base_url":  deps.Settings.Get(service.SettingPublicBaseURL),
+			"upload_max_bytes": deps.Settings.GetInt64(service.SettingUploadMaxBytes, 100<<20),
+			"retention_days":   deps.Settings.GetInt64(service.SettingRetentionDays, 30),
 		})
 	})
 
@@ -60,6 +111,10 @@ func registerMeRoutes(group *gin.RouterGroup, deps *Deps) {
 			response.BadRequest(c, "名称最多 64 字")
 			return
 		}
+		if in.ExpiresAt != nil && !in.ExpiresAt.After(time.Now()) {
+			response.BadRequest(c, "到期时间必须晚于当前时间")
+			return
+		}
 		plaintext, view, err := deps.Tokens.Create(user.ID, strings.TrimSpace(in.Name), in.ExpiresAt)
 		if err != nil {
 			response.ServerError(c, "创建失败")
@@ -81,10 +136,7 @@ func registerMeRoutes(group *gin.RouterGroup, deps *Deps) {
 }
 
 func meQuota(deps *Deps, user middleware.AuthUser) (limit uint64, used uint64) {
-	if user.Role == model.UserRoleSuperAdmin {
-		return 0, 0 // 不限
-	}
-	if g, err := deps.Groups.Get(user.GroupID); err == nil {
+	if g, err := deps.Groups.Get(user.GroupID); err == nil && user.Role != model.UserRoleSuperAdmin {
 		limit = g.QuotaBytes
 	}
 	if used, err := deps.Uploads.UsedBytes(user.ID); err == nil {
@@ -98,16 +150,14 @@ func registerImageManageRoutes(group *gin.RouterGroup, deps *Deps) {
 	group.GET("/images", func(c *gin.Context) {
 		user, _ := middleware.CurrentUser(c)
 		q := service.ImageQuery{
-			Tag:     c.Query("tag"),
-			Mime:    c.Query("mime"),
-			Keyword: c.Query("keyword"),
+			UserID:   user.ID,
+			Tag:      c.Query("tag"),
+			Mime:     c.Query("mime"),
+			Keyword:  c.Query("keyword"),
 			Recycled: c.Query("recycled") == "1",
 		}
-		if q.Recycled && user.Role == model.UserRoleUser {
-			response.Forbidden(c, "回收站总览仅管理员可见")
-			return
-		}
-		if user.Role != model.UserRoleUser {
+		if user.Role != model.UserRoleUser && c.Query("scope") == "all" {
+			q.UserID = 0
 			if uid := parseUint64(c.Query("user_id")); uid != 0 {
 				q.UserID = uid
 			}
@@ -120,15 +170,30 @@ func registerImageManageRoutes(group *gin.RouterGroup, deps *Deps) {
 				q.Before = &t
 			}
 		}
+		q.BeforeID = parseUint64(c.Query("before_id"))
 		if limit := parseUint64(c.Query("limit")); limit > 0 && limit <= 100 {
 			q.Limit = int(limit)
 		}
+		limit := q.Limit
+		if limit == 0 {
+			limit = 50
+		}
+		q.Limit = limit + 1
 		items, err := deps.Images.List(q)
 		if err != nil {
 			response.ServerError(c, "查询失败")
 			return
 		}
-		response.OK(c, gin.H{"items": items})
+		hasMore := len(items) > limit
+		if hasMore {
+			items = items[:limit]
+		}
+		var cursor any
+		if hasMore {
+			last := items[len(items)-1]
+			cursor = gin.H{"before": last.CreatedAt, "before_id": last.ID}
+		}
+		response.OK(c, gin.H{"items": items, "has_more": hasMore, "next_cursor": cursor})
 	})
 
 	group.PATCH("/images/:id", func(c *gin.Context) {
@@ -162,10 +227,18 @@ func registerImageManageRoutes(group *gin.RouterGroup, deps *Deps) {
 		user, _ := middleware.CurrentUser(c)
 		id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 		err := deps.Images.Restore(id, user.ID, user.Role == model.UserRoleSuperAdmin, func(owner uint64, add uint64) error {
-			if user.Role == model.UserRoleSuperAdmin && owner != user.ID {
+			var target model.User
+			if err := deps.DB.First(&target, owner).Error; err != nil {
+				return err
+			}
+			if target.Role == model.UserRoleSuperAdmin {
 				return nil
 			}
-			if g, err := deps.Groups.Get(user.GroupID); err == nil && g.QuotaBytes > 0 {
+			g, err := deps.Groups.Get(target.GroupID)
+			if err != nil {
+				return err
+			}
+			if g.QuotaBytes > 0 {
 				used, err := deps.Uploads.UsedBytes(owner)
 				if err != nil {
 					return err

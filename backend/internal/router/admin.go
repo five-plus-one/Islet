@@ -248,6 +248,41 @@ func registerUserRoutes(admin *gin.RouterGroup, deps *Deps) {
 
 	super := admin.Group("")
 	super.Use(middleware.RequireSuperAdmin())
+	super.POST("/users", func(c *gin.Context) {
+		var in struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+			GroupID  uint64 `json:"group_id"`
+		}
+		if c.ShouldBindJSON(&in) != nil || strings.TrimSpace(in.Username) == "" || len([]rune(in.Username)) > 64 {
+			response.BadRequest(c, "请填写 1–64 字的用户名")
+			return
+		}
+		if _, err := deps.Groups.Get(in.GroupID); err != nil {
+			response.BadRequest(c, "请选择有效的用户分组")
+			return
+		}
+		hash, err := service.HashPassword(in.Password)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		var count int64
+		if err := deps.DB.Model(&model.User{}).Where("auth_source = ? AND username = ?", model.AuthSourceLocal, strings.TrimSpace(in.Username)).Count(&count).Error; err != nil {
+			response.ServerError(c, "无法检查用户名")
+			return
+		}
+		if count > 0 {
+			response.BadRequest(c, "用户名已存在")
+			return
+		}
+		user := model.User{Username: strings.TrimSpace(in.Username), PasswordHash: &hash, AuthSource: model.AuthSourceLocal, Role: model.UserRoleUser, Status: model.StatusActive, GroupID: in.GroupID}
+		if err := deps.DB.Create(&user).Error; err != nil {
+			response.ServerError(c, "创建用户失败")
+			return
+		}
+		response.OK(c, gin.H{"id": user.ID, "username": user.Username})
+	})
 	super.PATCH("/users/:id/role", func(c *gin.Context) {
 		var in struct {
 			Role string `json:"role"`
@@ -367,6 +402,28 @@ func registerSettingsRoutes(admin *gin.RouterGroup, deps *Deps) {
 			response.BadRequest(c, "参数错误")
 			return
 		}
+		local := deps.Settings.Get(service.SettingAuthLocalEnabled)
+		if v, ok := in[service.SettingAuthLocalEnabled]; ok {
+			local = v
+		}
+		issuer := deps.Settings.Get(service.SettingAuthOIDCIssuer)
+		client := deps.Settings.Get(service.SettingAuthOIDCClientID)
+		if v, ok := in[service.SettingAuthOIDCIssuer]; ok {
+			issuer = v
+		}
+		if v, ok := in[service.SettingAuthOIDCClientID]; ok {
+			client = v
+		}
+		if issuer == "" {
+			issuer = deps.Cfg.OIDCIssuer
+		}
+		if client == "" {
+			client = deps.Cfg.OIDCClientID
+		}
+		if local == "false" && (strings.TrimSpace(issuer) == "" || strings.TrimSpace(client) == "") {
+			response.BadRequest(c, "请先配置统一登录，再关闭本地登录")
+			return
+		}
 		if err := deps.Settings.Put(in); err != nil {
 			response.BadRequest(c, err.Error())
 			return
@@ -387,7 +444,7 @@ func registerSystemRoutes(admin *gin.RouterGroup, deps *Deps) {
 		}
 		response.OK(c, gin.H{"items": items})
 	})
-	admin.POST("/recycle/purge-all", func(c *gin.Context) {
+	admin.POST("/recycle/purge-all", middleware.RequireSuperAdmin(), func(c *gin.Context) {
 		user, _ := middleware.CurrentUser(c)
 		count, err := deps.Images.PurgeAllRecycle(c.Request.Context())
 		if err != nil {

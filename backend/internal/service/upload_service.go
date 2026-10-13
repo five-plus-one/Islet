@@ -24,8 +24,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
-	"mime/multipart"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+	"mime/multipart"
 
 	"islet/backend/internal/model"
 	"islet/backend/internal/storage"
@@ -59,15 +60,15 @@ func NewUploadService(db *gorm.DB, rdb *redis.Client, policies *PolicyService, g
 }
 
 type UploadInput struct {
-	UserID    uint64
-	GroupID   uint64 // super_admin 传 0 表示不受分组限制
-	IsSuper   bool
-	FileName  string
-	Content   io.Reader
-	Declared  int64 // 客户端声明的大小，仅作预检
-	PolicyID  uint64 // 显式指定策略（须在分组白名单内）
-	AlbumID   *uint64
-	Tags      []string
+	UserID   uint64
+	GroupID  uint64 // super_admin 传 0 表示不受分组限制
+	IsSuper  bool
+	FileName string
+	Content  io.Reader
+	Declared int64  // 客户端声明的大小，仅作预检
+	PolicyID uint64 // 显式指定策略（须在分组白名单内）
+	AlbumID  *uint64
+	Tags     []string
 }
 
 type UploadResult struct {
@@ -77,6 +78,33 @@ type UploadResult struct {
 
 // Upload 单文件完整链路。
 func (s *UploadService) Upload(ctx context.Context, in UploadInput) (UploadResult, error) {
+	var result UploadResult
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var owner model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&owner, in.UserID).Error; err != nil {
+			return err
+		}
+		if owner.Status != model.StatusActive {
+			return ErrAccountUnavailable
+		}
+		in.GroupID = owner.GroupID
+		in.IsSuper = owner.Role == model.UserRoleSuperAdmin
+		copy := *s
+		copy.db = tx
+		var err error
+		result, err = copy.upload(ctx, in)
+		return err
+	})
+	return result, err
+}
+
+func (s *UploadService) upload(ctx context.Context, in UploadInput) (UploadResult, error) {
+	if in.AlbumID != nil {
+		var album model.Album
+		if err := s.db.Where("id = ? AND user_id = ?", *in.AlbumID, in.UserID).First(&album).Error; err != nil {
+			return UploadResult{}, ErrAlbumNotFound
+		}
+	}
 	// 1. 全量读入（限站点上限）
 	limit := s.settings.GetInt64(SettingUploadMaxBytes, 100<<20)
 	if limit <= 0 {
@@ -120,15 +148,6 @@ func (s *UploadService) Upload(ctx context.Context, in UploadInput) (UploadResul
 				return UploadResult{}, err
 			}
 		}
-		if group.QuotaBytes > 0 {
-			used, err := s.usedBytes(in.UserID)
-			if err != nil {
-				return UploadResult{}, err
-			}
-			if used+uint64(len(data)) > group.QuotaBytes {
-				return UploadResult{}, ErrUploadQuota
-			}
-		}
 	}
 
 	// 4. 去重（同用户同内容）
@@ -137,6 +156,15 @@ func (s *UploadService) Upload(ctx context.Context, in UploadInput) (UploadResul
 	var existing model.Image
 	if err := s.db.Where("user_id = ? AND sha256 = ?", in.UserID, digest).First(&existing).Error; err == nil {
 		return UploadResult{Image: existing, Duplicate: true}, nil
+	}
+	if !in.IsSuper && group.QuotaBytes > 0 {
+		used, err := s.usedBytes(in.UserID)
+		if err != nil {
+			return UploadResult{}, err
+		}
+		if used+uint64(len(data)) > group.QuotaBytes {
+			return UploadResult{}, ErrUploadQuota
+		}
 	}
 
 	// 5. 选策略
@@ -165,6 +193,9 @@ func (s *UploadService) Upload(ctx context.Context, in UploadInput) (UploadResul
 	var thumbData []byte
 	if len(data) <= thumbDecodeMax {
 		if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
+			if int64(cfg.Width)*int64(cfg.Height) > 40_000_000 {
+				return UploadResult{}, errors.New("图片像素过大，请缩小至 4000 万像素以内")
+			}
 			width, height = cfg.Width, cfg.Height
 		}
 		if thumb, ok := buildThumb(data); ok {
@@ -175,6 +206,11 @@ func (s *UploadService) Upload(ctx context.Context, in UploadInput) (UploadResul
 				tk = key + ".thumb.jpg"
 			}
 			thumbData = thumb
+			if len(thumb) >= 8 && bytes.Equal(thumb[:8], []byte{137, 80, 78, 71, 13, 10, 26, 10}) {
+				tk = key + ".thumb.png"
+			} else {
+				tk = key + ".thumb.jpg"
+			}
 			thumbKey = tk
 		}
 	}
@@ -423,8 +459,8 @@ func sanitizeBaseName(name string) string {
 	if result == "" {
 		return "image"
 	}
-	if len(result) > 120 {
-		result = result[:120]
+	if len([]rune(result)) > 120 {
+		result = string([]rune(result)[:120])
 	}
 	return result
 }
@@ -434,8 +470,8 @@ func sanitizeName(name string) string {
 	if name == "" || name == "." || name == "/" {
 		return "image"
 	}
-	if len(name) > 255 {
-		name = name[len(name)-255:]
+	if len([]rune(name)) > 255 {
+		name = string([]rune(name)[:255])
 	}
 	return name
 }
@@ -461,7 +497,8 @@ func normalizeTags(tags []string) []string {
 	return result
 }
 
-func humanBytes(n int64) string {	const unit = 1024
+func humanBytes(n int64) string {
+	const unit = 1024
 	if n < unit {
 		return fmt.Sprintf("%d B", n)
 	}

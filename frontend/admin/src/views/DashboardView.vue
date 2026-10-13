@@ -1,93 +1,141 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
+import {
+  NAlert,
+  NButton,
+  NCard,
+  NDataTable,
+  NSkeleton,
+  type DataTableColumns,
+} from "naive-ui";
+import { api } from "../api";
+import { errorText, humanBytes } from "../utils";
+import PageHeader from "../components/PageHeader.vue";
+import AppIcon from "../components/AppIcon.vue";
+const router = useRouter(),
+  loading = ref(true),
+  error = ref("");
+const overview = ref<Record<string, unknown>>({}),
+  trend = ref<{ date: string; count: number; bytes: number }[]>([]),
+  groups = ref<
+    {
+      group_id: number;
+      name: string;
+      quota_bytes: number;
+      used_bytes: number;
+      images: number;
+    }[]
+  >([]);
+const cards = computed(() => [
+  { label: "图片总数", value: overview.value.total_images, icon: "image" },
+  {
+    label: "图片总容量",
+    value:
+      overview.value.total_bytes === undefined
+        ? "—"
+        : humanBytes(Number(overview.value.total_bytes)),
+    icon: "storage",
+  },
+  { label: "今日上传", value: overview.value.today_images, icon: "upload" },
+  { label: "待审核用户", value: overview.value.pending_users, icon: "users" },
+]);
+const max = computed(() => Math.max(1, ...trend.value.map((x) => x.count)));
+const columns: DataTableColumns<(typeof groups.value)[number]> = [
+  { title: "分组", key: "name" },
+  { title: "图片数", key: "images" },
+  {
+    title: "累计用量",
+    key: "used_bytes",
+    render: (r) => humanBytes(r.used_bytes),
+  },
+  {
+    title: "每位成员配额",
+    key: "quota_bytes",
+    render: (r) => (r.quota_bytes ? humanBytes(r.quota_bytes) : "不限"),
+  },
+];
+async function load() {
+  loading.value = true;
+  error.value = "";
+  const results = await Promise.allSettled([
+    api.overview(),
+    api.trend(14),
+    api.groupUsage(),
+  ]);
+  if (results[0].status === "fulfilled") overview.value = results[0].value;
+  if (results[1].status === "fulfilled") trend.value = results[1].value.items;
+  if (results[2].status === "fulfilled") groups.value = results[2].value.items;
+  const failure = results.find((r) => r.status === "rejected");
+  if (failure?.status === "rejected") error.value = errorText(failure.reason);
+  loading.value = false;
+}
+onMounted(load);
+</script>
 <template>
   <div class="page">
-    <n-h2>数据看板</n-h2>
+    <PageHeader
+      title="运行概览"
+      description="了解图片增长、容量使用与待办事项。"
+      eyebrow="OVERVIEW"
+      ><n-button :loading="loading" @click="load"
+        ><template #icon><AppIcon name="refresh" :size="17" /></template
+        >刷新数据</n-button
+      ></PageHeader
+    ><n-alert v-if="error" type="error" style="margin-bottom: 20px"
+      >部分数据加载失败：{{ error }}
+      <n-button text @click="load">重试</n-button></n-alert
+    >
     <div class="stat-cards">
-      <n-card v-for="item in statCards" :key="item.label" size="small">
-        <n-statistic :label="item.label" :value="item.value" />
-      </n-card>
+      <div v-for="card in cards" :key="card.label" class="surface stat-card">
+        <div class="stat-label">
+          {{ card.label }}<AppIcon :name="card.icon" :size="18" />
+        </div>
+        <n-skeleton v-if="loading" height="34px" style="margin-top: 14px" />
+        <div v-else class="stat-value">{{ card.value ?? "—" }}</div>
+      </div>
     </div>
-    <n-card title="近 14 天上传趋势" size="small">
-      <div ref="chartEl" style="height: 300px"></div>
-    </n-card>
-    <n-card title="分组用量" size="small" style="margin-top: 16px">
-      <n-data-table :columns="groupColumns" :data="groupRows" size="small" :bordered="false" />
-    </n-card>
+    <n-card :bordered="false"
+      ><div class="section-head">
+        <div>
+          <h2 class="section-title">上传趋势</h2>
+          <p class="subtle" style="margin-bottom: 0">最近 14 天 · 图片数量</p>
+        </div>
+        <n-button text type="primary" @click="router.push('/images?scope=all')"
+          >查看图片库 →</n-button
+        >
+      </div>
+      <n-skeleton v-if="loading" height="230px" />
+      <div
+        v-else-if="trend.length"
+        class="chart-bars"
+        role="img"
+        :aria-label="
+          '近14天上传' + trend.reduce((sum, x) => sum + x.count, 0) + '张图片'
+        "
+      >
+        <div
+          v-for="day in trend"
+          :key="day.date"
+          class="chart-day"
+          :title="`${day.date}：${day.count} 张，${humanBytes(day.bytes)}`"
+        >
+          <div
+            class="chart-bar"
+            :style="{ height: Math.max(2, (day.count / max) * 180) + 'px' }"
+          />
+          <span>{{ day.date.slice(5) }}</span>
+        </div>
+      </div>
+      <p v-else class="subtle">趋势数据暂时不可用</p></n-card
+    ><n-card title="分组存储用量" :bordered="false" style="margin-top: 22px"
+      ><n-data-table
+        :columns="columns"
+        :data="groups"
+        :loading="loading"
+        :bordered="false"
+        :pagination="{ pageSize: 10 }"
+        :scroll-x="600"
+    /></n-card>
   </div>
 </template>
-
-<script setup lang="ts">
-import { computed, onMounted, ref, h } from 'vue';
-import { NCard, NDataTable, NH2, NStatistic, type DataTableColumns } from 'naive-ui';
-import { api } from '../api';
-
-interface Overview {
-  total_images?: number;
-  total_bytes?: number;
-  total_users?: number;
-  pending_users?: number;
-  today_images?: number;
-  recycled_count?: number;
-}
-
-const overview = ref<Overview>({});
-const trendRows = ref<{ date: string; count: number; bytes: number }[]>([]);
-const groupRows = ref<{ group_id: number; name: string; quota_bytes: number; used_bytes: number; images: number }[]>([]);
-const chartEl = ref<HTMLElement>();
-
-function humanBytes(n: number): string {
-  if (!n) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let value = n;
-  let i = 0;
-  while (value >= 1024 && i < units.length - 1) {
-    value /= 1024;
-    i++;
-  }
-  return `${value.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
-}
-
-const statCards = computed(() => [
-  { label: '图片总数', value: overview.value.total_images ?? 0 },
-  { label: '存储用量', value: humanBytes(overview.value.total_bytes ?? 0) },
-  { label: '今日上传', value: overview.value.today_images ?? 0 },
-  { label: '用户数', value: overview.value.total_users ?? 0 },
-  { label: '待审核用户', value: overview.value.pending_users ?? 0 },
-  { label: '回收站', value: overview.value.recycled_count ?? 0 }
-]);
-
-const groupColumns: DataTableColumns<{ group_id: number; name: string; quota_bytes: number; used_bytes: number; images: number }> = [
-  { title: '分组', key: 'name' },
-  { title: '图片数', key: 'images' },
-  { title: '已用', key: 'used', render: (row) => humanBytes(row.used_bytes) },
-  {
-    title: '配额',
-    key: 'quota',
-    render: (row) => (row.quota_bytes > 0 ? humanBytes(row.quota_bytes) : '不限')
-  }
-];
-
-// 简易柱状图（避免引入 ECharts 的体积；后续可替换）
-function renderChart() {
-  const el = chartEl.value;
-  if (!el) return;
-  const max = Math.max(1, ...trendRows.value.map((r) => r.count));
-  const bars = trendRows.value
-    .map(
-      (r) =>
-        `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
-          <div title="${r.date}: ${r.count}" style="width:70%;height:${Math.round((r.count / max) * 220)}px;min-height:2px;background:#18a058;border-radius:4px 4px 0 0"></div>
-          <div style="font-size:10px;color:#8aa396">${r.date.slice(5)}</div>
-        </div>`
-    )
-    .join('');
-  el.innerHTML = `<div style="display:flex;align-items:flex-end;height:260px;gap:4px">${bars}</div>`;
-}
-
-onMounted(async () => {
-  const [overviewData, trend, groups] = await Promise.all([api.overview(), api.trend(14), api.groupUsage()]);
-  overview.value = overviewData as Overview;
-  trendRows.value = trend.items;
-  groupRows.value = groups.items;
-  renderChart();
-});
-</script>

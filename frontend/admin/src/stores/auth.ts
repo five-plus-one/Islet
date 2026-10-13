@@ -1,17 +1,18 @@
-import { defineStore } from 'pinia';
-import { api, clearSession, type AuthUser } from '../api';
+import { defineStore } from "pinia";
+import { api, clearSession, type AuthUser } from "../api";
+import { useUploadStore } from "./uploads";
 
-export const useAuthStore = defineStore('auth', {
+export const useAuthStore = defineStore("auth", {
   state: () => ({
     user: null as AuthUser | null,
     initialized: true,
-    checked: false
+    checked: false,
   }),
   actions: {
     async fetchUser(): Promise<AuthUser | null> {
       try {
         const status = await api.setupStatus();
-        this.initialized = status.status === 'ready';
+        this.initialized = status.status === "ready";
         if (!this.initialized) {
           this.checked = true;
           return null;
@@ -28,13 +29,10 @@ export const useAuthStore = defineStore('auth', {
       return this.user;
     },
     async logout(): Promise<void> {
-      try {
-        await api.logout();
-      } catch {
-        // 忽略登出失败
-      }
+      await api.logout();
       clearSession();
+      useUploadStore().reset();
       this.user = null;
-    }
-  }
+    },
+  },
 });

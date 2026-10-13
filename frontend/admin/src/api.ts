@@ -16,14 +16,22 @@ export class ApiError extends Error {
   }
 }
 
-export async function request<T>(path: string, options: RequestInit = {}, auth = true): Promise<T> {
+export async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  auth = true,
+): Promise<T> {
   const headers = new Headers(options.headers);
   if (auth) {
     const token = getAccessToken();
-    if (token) headers.set('Authorization', `Bearer ${token}`);
+    if (token) headers.set("Authorization", `Bearer ${token}`);
   }
-  if (options.body && !headers.has('Content-Type') && !(options.body instanceof FormData)) {
-    headers.set('Content-Type', 'application/json');
+  if (
+    options.body &&
+    !headers.has("Content-Type") &&
+    !(options.body instanceof FormData)
+  ) {
+    headers.set("Content-Type", "application/json");
   }
   const response = await fetch(path, { ...options, headers });
   let payload: ApiResponse<T> | null = null;
@@ -33,25 +41,32 @@ export async function request<T>(path: string, options: RequestInit = {}, auth =
     payload = null;
   }
   if (!response.ok || !payload || payload.code !== 0) {
+    if (response.status === 401 && auth && !path.startsWith("/api/v1/auth/")) {
+      window.dispatchEvent(new Event("islet:session-expired"));
+    }
     const message = payload?.message ?? `请求失败（HTTP ${response.status}）`;
-    throw new ApiError(message, payload?.code ?? response.status, response.status);
+    throw new ApiError(
+      message,
+      payload?.code ?? response.status,
+      response.status,
+    );
   }
   return payload.data;
 }
 
 // ---- 会话 token 存储 ----
 
-const accessTokenKey = 'islet_access_token';
-const idTokenKey = 'islet_id_token';
-const verifierKey = 'islet_pkce_verifier';
-const stateKey = 'islet_oidc_state';
+const accessTokenKey = "islet_access_token";
+const idTokenKey = "islet_id_token";
+const verifierKey = "islet_pkce_verifier";
+const stateKey = "islet_oidc_state";
 
 export function getAccessToken(): string {
-  return localStorage.getItem(accessTokenKey) ?? '';
+  return localStorage.getItem(accessTokenKey) ?? "";
 }
 
 export function getIDToken(): string {
-  return localStorage.getItem(idTokenKey) ?? '';
+  return localStorage.getItem(idTokenKey) ?? "";
 }
 
 export function saveSession(accessToken: string, idToken: string): void {
@@ -69,7 +84,7 @@ export function clearSession(): void {
 // ---- 类型 ----
 
 export interface AuthConfig {
-  mode: 'oidc' | 'local';
+  mode: "oidc" | "local";
   local_enabled: boolean;
   issuer: string;
   client_id: string;
@@ -89,9 +104,9 @@ export interface AuthUser {
   subject: string;
   email: string;
   username: string;
-  role: 'super_admin' | 'admin' | 'user';
+  role: "super_admin" | "admin" | "user";
   status: string;
-  auth_source: 'oidc' | 'local';
+  auth_source: "oidc" | "local";
   group_id: number;
   via_token?: boolean;
 }
@@ -99,9 +114,9 @@ export interface AuthUser {
 export interface PolicyView {
   id: number;
   name: string;
-  driver: 'local' | 's3';
-  url_mode: 'direct' | 'proxy';
-  naming: 'keep' | 'random' | 'date';
+  driver: "local" | "s3";
+  url_mode: "direct" | "proxy";
+  naming: "keep" | "random" | "date";
   is_default: boolean;
   status: string;
   endpoint?: string;
@@ -199,118 +214,262 @@ export interface MeInfo {
   group: Partial<GroupView>;
   quota: { limit: number; used: number };
   policies: PolicyView[];
+  public_base_url: string;
+  upload_max_bytes: number;
+  retention_days: number;
 }
 
 // ---- API 函数 ----
 
 export const api = {
-  authConfig: () => request<AuthConfig>('/api/v1/auth/config', {}, false),
+  authConfig: () => request<AuthConfig>("/api/v1/auth/config", {}, false),
 
   localLogin: (username: string, password: string) =>
-    request<AuthUser>('/api/v1/auth/local/login', { method: 'POST', body: JSON.stringify({ username, password }) }, false),
+    request<AuthUser>(
+      "/api/v1/auth/local/login",
+      { method: "POST", body: JSON.stringify({ username, password }) },
+      false,
+    ),
 
   oidcExchange: (code: string, verifier: string, redirectUri: string) =>
-    request<{ access_token: string; id_token: string; expires_in: number; username: string }>(
-      '/api/v1/auth/oidc/callback',
-      { method: 'POST', body: JSON.stringify({ code, code_verifier: verifier, redirect_uri: redirectUri }) },
-      false
+    request<{
+      access_token: string;
+      id_token: string;
+      expires_in: number;
+      username: string;
+    }>(
+      "/api/v1/auth/oidc/callback",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          code,
+          code_verifier: verifier,
+          redirect_uri: redirectUri,
+        }),
+      },
+      false,
     ),
 
-  logout: () => request<{ logged_out: boolean }>('/api/v1/auth/logout', { method: 'POST' }),
+  logout: () =>
+    request<{ logged_out: boolean }>("/api/v1/auth/logout", { method: "POST" }),
 
-  me: () => request<AuthUser>('/api/v1/auth/me'),
+  me: () => request<AuthUser>("/api/v1/auth/me"),
 
-  meInfo: () => request<MeInfo>('/api/v1/me'),
-
-  tokens: () => request<{ items: TokenView[] }>('/api/v1/me/tokens'),
-  createToken: (name: string, expiresAt?: string) =>
-    request<{ token: string; item: TokenView }>('/api/v1/me/tokens', {
-      method: 'POST',
-      body: JSON.stringify({ name, expires_at: expiresAt || null })
+  meInfo: () => request<MeInfo>("/api/v1/me"),
+  changePassword: (current_password: string, password: string) =>
+    request("/api/v1/me/password", {
+      method: "POST",
+      body: JSON.stringify({ current_password, password }),
     }),
-  revokeToken: (id: number) => request<{ revoked: boolean }>(`/api/v1/me/tokens/${id}`, { method: 'DELETE' }),
+  createUser: (username: string, password: string, group_id: number) =>
+    request("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify({ username, password, group_id }),
+    }),
 
-  images: (params: string) => request<{ items: ImageItem[] }>(`/api/v1/images${params}`),
-  updateImage: (id: number, body: object) => request<ImageItem>(`/api/v1/images/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-  recycleImage: (id: number) => request<{ recycled: boolean }>(`/api/v1/images/${id}`, { method: 'DELETE' }),
-  restoreImage: (id: number) => request<{ restored: boolean }>(`/api/v1/images/${id}/restore`, { method: 'POST' }),
-  purgeImage: (id: number) => request<{ purged: boolean }>(`/api/v1/images/${id}/purge`, { method: 'DELETE' }),
+  tokens: () => request<{ items: TokenView[] }>("/api/v1/me/tokens"),
+  createToken: (name: string, expiresAt?: string) =>
+    request<{ token: string; item: TokenView }>("/api/v1/me/tokens", {
+      method: "POST",
+      body: JSON.stringify({ name, expires_at: expiresAt || null }),
+    }),
+  revokeToken: (id: number) =>
+    request<{ revoked: boolean }>(`/api/v1/me/tokens/${id}`, {
+      method: "DELETE",
+    }),
 
-  albums: () => request<{ items: AlbumView[] }>('/api/v1/albums'),
+  images: (params: string) =>
+    request<{ items: ImageItem[]; has_more: boolean }>(
+      `/api/v1/images${params}`,
+    ),
+  updateImage: (id: number, body: object) =>
+    request<ImageItem>(`/api/v1/images/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  recycleImage: (id: number) =>
+    request<{ recycled: boolean }>(`/api/v1/images/${id}`, {
+      method: "DELETE",
+    }),
+  restoreImage: (id: number) =>
+    request<{ restored: boolean }>(`/api/v1/images/${id}/restore`, {
+      method: "POST",
+    }),
+  purgeImage: (id: number) =>
+    request<{ purged: boolean }>(`/api/v1/images/${id}/purge`, {
+      method: "DELETE",
+    }),
+
+  albums: () => request<{ items: AlbumView[] }>("/api/v1/albums"),
   createAlbum: (name: string, description: string) =>
-    request<AlbumView>('/api/v1/albums', { method: 'POST', body: JSON.stringify({ name, description }) }),
+    request<AlbumView>("/api/v1/albums", {
+      method: "POST",
+      body: JSON.stringify({ name, description }),
+    }),
   updateAlbum: (id: number, name: string, description: string) =>
-    request<AlbumView>(`/api/v1/albums/${id}`, { method: 'PATCH', body: JSON.stringify({ name, description }) }),
-  deleteAlbum: (id: number) => request<{ deleted: boolean }>(`/api/v1/albums/${id}`, { method: 'DELETE' }),
+    request<AlbumView>(`/api/v1/albums/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name, description }),
+    }),
+  deleteAlbum: (id: number) =>
+    request<{ deleted: boolean }>(`/api/v1/albums/${id}`, { method: "DELETE" }),
 
-  policies: () => request<{ items: PolicyView[] }>('/api/admin/storage-policies'),
+  policies: () =>
+    request<{ items: PolicyView[] }>("/api/admin/storage-policies"),
   savePolicy: (input: PolicyInput) =>
     input.id
-      ? request<PolicyView>(`/api/admin/storage-policies/${input.id}`, { method: 'PATCH', body: JSON.stringify(input) })
-      : request<PolicyView>('/api/admin/storage-policies', { method: 'POST', body: JSON.stringify(input) }),
-  deletePolicy: (id: number) => request<{ deleted: boolean }>(`/api/admin/storage-policies/${id}`, { method: 'DELETE' }),
+      ? request<PolicyView>(`/api/admin/storage-policies/${input.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(input),
+        })
+      : request<PolicyView>("/api/admin/storage-policies", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+  deletePolicy: (id: number) =>
+    request<{ deleted: boolean }>(`/api/admin/storage-policies/${id}`, {
+      method: "DELETE",
+    }),
   testPolicy: (input: Partial<PolicyInput>) =>
-    request<{ ok: boolean; message: string }>('/api/admin/storage-policies/test', { method: 'POST', body: JSON.stringify(input) }),
+    request<{ ok: boolean; message: string }>(
+      "/api/admin/storage-policies/test",
+      { method: "POST", body: JSON.stringify(input) },
+    ),
   testPolicyById: (id: number) =>
-    request<{ ok: boolean; message: string }>(`/api/admin/storage-policies/${id}/test`, { method: 'POST' }),
+    request<{ ok: boolean; message: string }>(
+      `/api/admin/storage-policies/${id}/test`,
+      { method: "POST" },
+    ),
 
-  groups: () => request<{ items: GroupView[] }>('/api/admin/user-groups'),
+  groups: () => request<{ items: GroupView[] }>("/api/admin/user-groups"),
   saveGroup: (input: Partial<GroupView> & { name: string }) =>
     input.id
-      ? request<GroupView>(`/api/admin/user-groups/${input.id}`, { method: 'PATCH', body: JSON.stringify(input) })
-      : request<GroupView>('/api/admin/user-groups', { method: 'POST', body: JSON.stringify(input) }),
-  deleteGroup: (id: number) => request<{ deleted: boolean }>(`/api/admin/user-groups/${id}`, { method: 'DELETE' }),
+      ? request<GroupView>(`/api/admin/user-groups/${input.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(input),
+        })
+      : request<GroupView>("/api/admin/user-groups", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+  deleteGroup: (id: number) =>
+    request<{ deleted: boolean }>(`/api/admin/user-groups/${id}`, {
+      method: "DELETE",
+    }),
 
-  users: (params = '') => request<{ items: UserView[] }>(`/api/admin/users${params}`),
+  users: (params = "") =>
+    request<{ items: UserView[] }>(`/api/admin/users${params}`),
   setUserGroup: (id: number, groupId: number) =>
-    request<{ updated: boolean }>(`/api/admin/users/${id}/group`, { method: 'PATCH', body: JSON.stringify({ group_id: groupId }) }),
+    request<{ updated: boolean }>(`/api/admin/users/${id}/group`, {
+      method: "PATCH",
+      body: JSON.stringify({ group_id: groupId }),
+    }),
   setUserRole: (id: number, role: string) =>
-    request<{ updated: boolean }>(`/api/admin/users/${id}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }),
+    request<{ updated: boolean }>(`/api/admin/users/${id}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
   setUserStatus: (id: number, status: string) =>
-    request<{ updated: boolean }>(`/api/admin/users/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+    request<{ updated: boolean }>(`/api/admin/users/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
 
-  overview: () => request<Record<string, unknown>>('/api/admin/stats/overview'),
-  trend: (days: number) => request<{ items: { date: string; count: number; bytes: number }[] }>(`/api/admin/stats/trend?days=${days}`),
-  groupUsage: () => request<{ items: { group_id: number; name: string; quota_bytes: number; used_bytes: number; images: number }[] }>('/api/admin/stats/groups'),
-
-  settings: () => request<Record<string, string>>('/api/admin/settings'),
-  saveSettings: (values: Record<string, string>) =>
-    request<Record<string, string>>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(values) }),
-  adminTestOIDC: (issuer: string) =>
-    request<{ issuer: string; authorization_endpoint: string; token_endpoint: string; jwks_uri: string }>(
-      '/api/admin/auth/test-oidc',
-      { method: 'POST', body: JSON.stringify({ issuer }) }
+  overview: () => request<Record<string, unknown>>("/api/admin/stats/overview"),
+  trend: (days: number) =>
+    request<{ items: { date: string; count: number; bytes: number }[] }>(
+      `/api/admin/stats/trend?days=${days}`,
     ),
+  groupUsage: () =>
+    request<{
+      items: {
+        group_id: number;
+        name: string;
+        quota_bytes: number;
+        used_bytes: number;
+        images: number;
+      }[];
+    }>("/api/admin/stats/groups"),
 
-  recycleList: () => request<{ items: ImageItem[] }>('/api/admin/recycle'),
-  purgeAllRecycle: () => request<{ purged: number }>('/api/admin/recycle/purge-all', { method: 'POST' }),
+  settings: () => request<Record<string, string>>("/api/admin/settings"),
+  saveSettings: (values: Record<string, string>) =>
+    request<Record<string, string>>("/api/admin/settings", {
+      method: "PUT",
+      body: JSON.stringify(values),
+    }),
+  adminTestOIDC: (issuer: string) =>
+    request<{
+      issuer: string;
+      authorization_endpoint: string;
+      token_endpoint: string;
+      jwks_uri: string;
+    }>("/api/admin/auth/test-oidc", {
+      method: "POST",
+      body: JSON.stringify({ issuer }),
+    }),
 
-  auditLogs: () => request<{ items: Record<string, unknown>[] }>('/api/admin/audit-logs'),
+  recycleList: () => request<{ items: ImageItem[] }>("/api/admin/recycle"),
+  purgeAllRecycle: () =>
+    request<{ purged: number }>("/api/admin/recycle/purge-all", {
+      method: "POST",
+    }),
+
+  auditLogs: () =>
+    request<{ items: Record<string, unknown>[] }>("/api/admin/audit-logs"),
 
   resetSystem: (confirm: string, password: string) =>
-    request<{ reset: boolean }>('/api/admin/system/reset', { method: 'POST', body: JSON.stringify({ confirm, password }) }),
+    request<{ reset: boolean }>("/api/admin/system/reset", {
+      method: "POST",
+      body: JSON.stringify({ confirm, password }),
+    }),
 
   setupStatus: () =>
-    request<{ status: string; auth_mode: string; admin_verified: boolean; defaults: Record<string, string>; auth_config: AuthConfig }>(
-      '/api/setup/status',
-      {},
-      false
-    ),
+    request<{
+      status: string;
+      auth_mode: string;
+      admin_verified: boolean;
+      defaults: Record<string, string>;
+      auth_config: AuthConfig;
+    }>("/api/setup/status", {}, false),
   setupTestDatabase: (input: Record<string, unknown>) =>
-    request<{ mysql: boolean; redis: boolean }>('/api/setup/test/database', { method: 'POST', body: JSON.stringify(input) }, false),
+    request<{ mysql: boolean; redis: boolean }>(
+      "/api/setup/test/database",
+      { method: "POST", body: JSON.stringify(input) },
+      false,
+    ),
   setupTestOIDC: (issuer: string, clientId: string) =>
-    request<{ issuer: string; authorization_endpoint: string; token_endpoint: string }>(
-      '/api/setup/test/oidc',
-      { method: 'POST', body: JSON.stringify({ issuer, client_id: clientId }) },
-      false
+    request<{
+      issuer: string;
+      authorization_endpoint: string;
+      token_endpoint: string;
+    }>(
+      "/api/setup/test/oidc",
+      { method: "POST", body: JSON.stringify({ issuer, client_id: clientId }) },
+      false,
     ),
   setupVerifyAdmin: (input: Record<string, string>) =>
-    request<{ mode: string; username: string }>('/api/setup/verify/admin', { method: 'POST', body: JSON.stringify(input) }, false),
-  setupComplete: (database: Record<string, unknown>, siteTitle: string, publicBaseUrl: string) =>
-    request<{ owner: string; status: string }>('/api/setup/complete', {
-      method: 'POST',
-      body: JSON.stringify({ database, site_title: siteTitle, public_base_url: publicBaseUrl })
-    }, false)
+    request<{ mode: string; username: string }>(
+      "/api/setup/verify/admin",
+      { method: "POST", body: JSON.stringify(input) },
+      false,
+    ),
+  setupComplete: (
+    database: Record<string, unknown>,
+    siteTitle: string,
+    publicBaseUrl: string,
+  ) =>
+    request<{ owner: string; status: string }>(
+      "/api/setup/complete",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          database,
+          site_title: siteTitle,
+          public_base_url: publicBaseUrl,
+        }),
+      },
+      false,
+    ),
 };
 
 // ---- OIDC PKCE（纯前端 S256） ----
@@ -318,39 +477,45 @@ export const api = {
 function randomString(length: number): string {
   const bytes = new Uint8Array(length);
   crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 async function pkceChallenge(verifier: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(verifier),
+  );
   return btoa(String.fromCharCode(...new Uint8Array(digest)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
-export async function beginOIDCLogin(config: AuthConfig, redirectUri?: string): Promise<void> {
+export async function beginOIDCLogin(
+  config: AuthConfig,
+  redirectUri?: string,
+): Promise<void> {
   const verifier = randomString(32);
   const state = randomString(16);
   const challenge = await pkceChallenge(verifier);
   sessionStorage.setItem(verifierKey, verifier);
   sessionStorage.setItem(stateKey, state);
   const params = new URLSearchParams({
-    response_type: 'code',
+    response_type: "code",
     client_id: config.client_id,
     redirect_uri: redirectUri || config.redirect_uri,
-    scope: config.scopes || 'openid profile email',
+    scope: config.scopes || "openid profile email",
     state,
     code_challenge: challenge,
-    code_challenge_method: 'S256'
+    code_challenge_method: "S256",
   });
   window.location.href = `${config.authorization_endpoint}?${params.toString()}`;
 }
 
 export function consumeOIDCState(): { state: string; verifier: string } | null {
-  const state = new URLSearchParams(window.location.search).get('state');
-  const verifier = sessionStorage.getItem(verifierKey) ?? '';
-  const savedState = sessionStorage.getItem(stateKey) ?? '';
+  const state = new URLSearchParams(window.location.search).get("state");
+  const verifier = sessionStorage.getItem(verifierKey) ?? "";
+  const savedState = sessionStorage.getItem(stateKey) ?? "";
   if (!state || !verifier || state !== savedState) return null;
   return { state, verifier };
 }

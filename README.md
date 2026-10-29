@@ -77,3 +77,9 @@ docker compose -f deploy/docker-compose.yml config
 ## 项目状态
 
 v0.1.0：认证 / 分组配额 / 多存储策略 / 上传访问 / PicGo / 相册标签 / 回收站 / 统计看板 / 初始化向导 / Docker 化 已全部实现并通过容器全链路验收。
+
+## 开源与贡献
+
+[GitHub 仓库](https://github.com/five-plus-one/Islet) · [贡献指南](CONTRIBUTING.md) · [安全报告](SECURITY.md)
+
+Islet 采用 [GPL-3.0-only](LICENSE)。共享组件库 5plus1-ui 独立采用 MIT，随包提供对应源码与构建入口；第三方依赖遵循各自许可证，见 [第三方声明](THIRD_PARTY_NOTICES.md)。

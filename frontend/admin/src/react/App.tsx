@@ -101,6 +101,9 @@ export function App() {
 }
 function Login({ theme }: { theme: React.ReactNode }) {
   const config = useLoad(api.authConfig);
+  useEffect(() => {
+    if (config.data?.site_title) document.title = config.data.site_title;
+  }, [config.data]);
   const [username, setUsername] = useState(""),
     [password, setPassword] = useState(""),
     [busy, setBusy] = useState(false),
@@ -112,7 +115,24 @@ function Login({ theme }: { theme: React.ReactNode }) {
     next.startsWith("/") && !next.startsWith("//") ? next : "/images";
   return (
     <AppEntryLayout
-      brand={<strong>Islet · 五加一图床</strong>}
+      brand={
+        <strong>
+          {config.data?.brand_logo && (
+            <img
+              src={config.data.brand_logo}
+              alt=""
+              style={{
+                width: 28,
+                height: 28,
+                objectFit: "contain",
+                verticalAlign: "middle",
+                marginRight: 8,
+              }}
+            />
+          )}
+          {config.data?.brand_name || "Islet"}
+        </strong>
+      }
       eyebrow="IMAGE LIBRARY"
       title={
         <>
@@ -194,6 +214,7 @@ function Login({ theme }: { theme: React.ReactNode }) {
           </div>
         )
       )}
+      <p><a href="https://github.com/five-plus-one/Islet" target="_blank" rel="noopener noreferrer">Islet · GitHub 开源项目</a></p>
     </AppEntryLayout>
   );
 }
@@ -258,6 +279,15 @@ function Callback({ setup = false }: { setup?: boolean }) {
   );
 }
 function Workspace({ theme }: { theme: React.ReactNode }) {
+  const branding = useLoad(api.authConfig);
+  useEffect(() => {
+    const reload = () => branding.reload();
+    window.addEventListener("islet:settings-saved", reload);
+    return () => window.removeEventListener("islet:settings-saved", reload);
+  }, []);
+  useEffect(() => {
+    if (branding.data?.site_title) document.title = branding.data.site_title;
+  }, [branding.data]);
   const [me, setMe] = useState<MeInfo>(),
     [error, setError] = useState(""),
     [message, setMessage] = useState(""),
@@ -322,7 +352,7 @@ function Workspace({ theme }: { theme: React.ReactNode }) {
       <div className="islet-brand">
         <Images />
         <strong>Islet</strong>
-        <span>五加一图床</span>
+        <span>{branding.data?.site_title || "图片工作台"}</span>
       </div>
       <ProductNavigation
         variant="sidebar"
@@ -334,6 +364,13 @@ function Workspace({ theme }: { theme: React.ReactNode }) {
         }}
       />
       <footer className="islet-capacity">
+        <a
+          href="https://github.com/five-plus-one/Islet"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          GitHub · Islet 开源项目
+        </a>
         <span>我的空间</span>
         <strong>
           {humanBytes(me.quota.used)}{" "}

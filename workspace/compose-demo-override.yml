@@ -1,6 +1,0 @@
-# 演示用 override：不对宿主暴露 MySQL/Redis 端口（容器内部互通即可），避免本机端口冲突
-services:
-  mysql:
-    ports: !override []
-  redis:
-    ports: !override []

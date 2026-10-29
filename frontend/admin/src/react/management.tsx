@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, Dialog, Checkbox, EmptyState } from "@fiveplusone/ui";
+import {
+  Button,
+  Card,
+  Dialog,
+  Checkbox,
+  EmptyState,
+  Tabs,
+} from "@fiveplusone/ui";
 import {
   api,
   type GroupView,
@@ -125,27 +132,62 @@ function Overview() {
   );
 }
 function Settings() {
-  const data = useLoad(api.settings),
-    { notify } = useSession();
-  const [values, setValues] = useState<Record<string, string>>({}),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+  const data = useLoad(() =>
+    Promise.all([api.settings(), api.loginDefaults()]),
+  );
+  const { notify } = useSession();
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [saved, setSaved] = useState<Record<string, string>>({});
+  const [section, setSection] = useState("site");
+  const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+  const [checkResult, setCheckResult] = useState("");
   useEffect(() => {
-    if (data.data) setValues(data.data);
+    if (data.data) {
+      setValues(data.data[0]);
+      setSaved(data.data[0]);
+    }
   }, [data.data]);
-  const field = (key: string, label: string) => (
+  const defaults = data.data?.[1] || {};
+  const changes = Object.fromEntries(
+    Object.entries(values).filter(([key, value]) => value !== saved[key]),
+  );
+  const dirty = Object.keys(changes).length > 0;
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    if (dirty) window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+  const update = (key: string, value: string) => {
+    setValues((x) => ({ ...x, [key]: value }));
+    setCheckResult("");
+  };
+  const effective = (key: string) => values[key]?.trim() || defaults[key] || "";
+  const field = (key: string, label: string, hint?: string, type = "text") => (
     <TextField
       key={key}
       label={label}
       value={values[key] || ""}
-      onChange={(v) => setValues((x) => ({ ...x, [key]: v }))}
+      type={type}
+      hint={hint}
+      onChange={(v) => update(key, v)}
     />
   );
+  const inherited = (key: string) =>
+    defaults[key]
+      ? `留空使用部署配置：${defaults[key]}`
+      : key === "auth.oidc_issuer" || key === "auth.oidc_client_id"
+        ? "启用统一登录时必填，由身份提供方提供。"
+        : "可选；仅在登录服务要求时填写。";
   return (
     <>
       <Heading
         title="系统设置"
-        description="配置站点、登录方式和图片保留规则。"
+        description="管理站点外观、登录方式与使用规则。"
       />
       <Failure error={data.error} retry={data.reload} />
       {data.loading ? (
@@ -154,13 +196,18 @@ function Settings() {
         data.data && (
           <form
             className="islet-form"
+            style={{ maxWidth: 880 }}
             onSubmit={async (e) => {
               e.preventDefault();
+              if (!dirty || busy) return;
               setBusy(true);
               setError("");
               try {
-                setValues(await api.saveSettings(values));
+                const result = await api.saveSettings(changes);
+                setValues(result);
+                setSaved(result);
                 notify("设置已保存");
+                window.dispatchEvent(new Event("islet:settings-saved"));
                 changed();
               } catch (e) {
                 setError(errorText(e));
@@ -169,90 +216,179 @@ function Settings() {
               }
             }}
           >
-            <div className="islet-card-grid">
+            <Tabs
+              value={section}
+              onChange={setSection}
+              items={[
+                { value: "site", label: "站点信息" },
+                { value: "login", label: "登录方式" },
+                { value: "rules", label: "使用规则" },
+              ]}
+            />
+            <fieldset
+              disabled={busy}
+              style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
+            >
               <Card>
-                <h2>站点信息</h2>
-                <div className="islet-form">
-                  {field("site.title", "站点名称")}
-                  {field("site.public_base_url", "图片访问地址")}
-                  {field("brand.name", "品牌名称")}
-                  {field("brand.logo_url", "品牌图标地址")}
-                  {field("brand.oidc_label", "统一登录按钮名称")}
-                </div>
-              </Card>
-              <Card>
-                <h2>统一登录</h2>
-                <div className="islet-form">
-                  {field("auth.oidc_issuer", "身份提供方地址（Issuer）")}
-                  {field("auth.oidc_client_id", "应用 ID")}
-                  {field("auth.oidc_audience", "资源标识（可选）")}
-                  {field("auth.oidc_scopes", "身份范围（Scopes）")}
-                  <Checkbox
-                    label="启用本地账户登录"
-                    checked={values["auth.local_enabled"] !== "false"}
-                    onChange={(e) =>
-                      setValues((x) => ({
-                        ...x,
-                        "auth.local_enabled": String(e.target.checked),
-                      }))
-                    }
-                  />
-                  <Button
-                    variant="secondary"
-                    onClick={async () => {
-                      try {
-                        await api.adminTestOIDC(values["auth.oidc_issuer"]);
-                        notify("登录服务连接正常");
-                      } catch (e) {
-                        setError(errorText(e));
+                {section === "site" && (
+                  <div className="islet-form">
+                    <h2 style={{ margin: 0 }}>站点信息</h2>
+                    <p className="fp-muted" style={{ margin: 0 }}>
+                      设置访客看到的名称，以及图片链接使用的访问地址。
+                    </p>
+                    {field("site.title", "站点名称", "用于标识当前图床。")}
+                    {field(
+                      "site.public_base_url",
+                      "图片访问地址",
+                      "填写完整网址，例如 https://img.example.com。对象存储的独立访问域名在存储策略中设置。",
+                      "url",
+                    )}
+                    {field("brand.name", "品牌名称", "显示在登录页面。")}
+                    {field(
+                      "brand.logo_url",
+                      "品牌图标地址",
+                      "可选，填写可公开访问的图片网址。",
+                      "url",
+                    )}
+                  </div>
+                )}
+                {section === "login" && (
+                  <div className="islet-form">
+                    <h2 style={{ margin: 0 }}>登录方式</h2>
+                    <p className="fp-muted" style={{ margin: 0 }}>
+                      {effective("auth.oidc_issuer") &&
+                      effective("auth.oidc_client_id")
+                        ? `统一登录已配置，当前服务：${effective("auth.oidc_issuer")}`
+                        : "统一登录尚未配置，请先启用本地账户登录。"}
+                    </p>
+                    <Checkbox
+                      label="允许本地账户登录"
+                      checked={values["auth.local_enabled"] !== "false"}
+                      onChange={(e) =>
+                        update("auth.local_enabled", String(e.target.checked))
                       }
-                    }}
-                  >
-                    检查登录服务
-                  </Button>
-                </div>
+                    />
+                    <p className="fp-muted" style={{ margin: 0 }}>
+                      本地账户使用用户名和密码登录。关闭前，请确认统一登录可以正常使用。
+                    </p>
+                    {field(
+                      "brand.oidc_label",
+                      "统一登录按钮名称",
+                      "例如：使用公司账户登录。",
+                    )}
+                    {field(
+                      "auth.oidc_issuer",
+                      "登录服务地址（Issuer）",
+                      inherited("auth.oidc_issuer"),
+                      "url",
+                    )}
+                    {field(
+                      "auth.oidc_client_id",
+                      "应用 ID（Client ID）",
+                      inherited("auth.oidc_client_id"),
+                    )}
+                    <p className="fp-muted" style={{ margin: 0 }}>
+                      在身份提供方登记的回调地址：
+                      <br />
+                      <code style={{ overflowWrap: "anywhere" }}>
+                        {defaults.redirect_uri}
+                      </code>
+                    </p>
+                    <details>
+                      <summary>高级登录选项</summary>
+                      <div className="islet-form">
+                        {field(
+                          "auth.oidc_audience",
+                          "资源标识（Audience）",
+                          inherited("auth.oidc_audience"),
+                        )}
+                        {field(
+                          "auth.oidc_scopes",
+                          "身份权限（Scopes）",
+                          inherited("auth.oidc_scopes"),
+                        )}
+                      </div>
+                    </details>
+                    <Button
+                      variant="secondary"
+                      loading={checking}
+                      disabled={!effective("auth.oidc_issuer")}
+                      onClick={async () => {
+                        setChecking(true);
+                        setError("");
+                        setCheckResult("");
+                        try {
+                          await api.adminTestOIDC(
+                            effective("auth.oidc_issuer"),
+                          );
+                          setCheckResult(
+                            "服务地址可访问。请保存后通过实际登录确认应用授权配置。",
+                          );
+                        } catch (e) {
+                          setError(errorText(e));
+                        } finally {
+                          setChecking(false);
+                        }
+                      }}
+                    >
+                      检查登录服务
+                    </Button>
+                    {checkResult && <p role="status">{checkResult}</p>}
+                  </div>
+                )}
+                {section === "rules" && (
+                  <div className="islet-form">
+                    <h2>上传与保留</h2>
+                    <TextField
+                      label="单张图片上限（MB）"
+                      type="number"
+                      value={Number(values["upload.max_bytes"] || 0) / 1048576}
+                      hint="允许 1–100 MB。用户分组设置更低上限时，以分组限制为准。"
+                      onChange={(v) =>
+                        update("upload.max_bytes", String(Number(v) * 1048576))
+                      }
+                    />
+                    {field(
+                      "recycle.retention_days",
+                      "回收站保留天数",
+                      "允许 0–3650 天。设为 0 时保留至手动清空；到期清理后无法恢复。",
+                      "number",
+                    )}
+                    <h2>新成员加入</h2>
+                    <Checkbox
+                      label="自动通过新用户注册"
+                      checked={values["users.auto_approve"] === "true"}
+                      onChange={(e) =>
+                        update("users.auto_approve", String(e.target.checked))
+                      }
+                    />
+                    <p className="fp-muted" style={{ margin: 0 }}>
+                      关闭后，新成员需由管理员在用户管理中审核后才能使用图床。已加入的成员不受影响。
+                    </p>
+                  </div>
+                )}
               </Card>
-              <Card>
-                <h2>上传与注册</h2>
-                <div className="islet-form">
-                  <TextField
-                    label="单张图片上限（MB）"
-                    type="number"
-                    value={
-                      Number(values["upload.max_bytes"] || 104857600) / 1048576
-                    }
-                    onChange={(v) =>
-                      setValues((x) => ({
-                        ...x,
-                        "upload.max_bytes": String(Number(v) * 1048576),
-                      }))
-                    }
-                  />
-                  <TextField
-                    label="回收站保留天数"
-                    type="number"
-                    value={values["recycle.retention_days"] || "30"}
-                    onChange={(v) =>
-                      setValues((x) => ({ ...x, "recycle.retention_days": v }))
-                    }
-                  />
-                  <Checkbox
-                    label="自动通过新用户注册"
-                    checked={values["users.auto_approve"] === "true"}
-                    onChange={(e) =>
-                      setValues((x) => ({
-                        ...x,
-                        "users.auto_approve": String(e.target.checked),
-                      }))
-                    }
-                  />
-                </div>
-              </Card>
-            </div>
+            </fieldset>
             <Failure error={error} />
-            <Button type="submit" loading={busy}>
-              保存设置
-            </Button>
+            <div className="islet-heading-actions">
+              <Button type="submit" loading={busy} disabled={!dirty}>
+                保存更改
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={!dirty || busy}
+                onClick={() => {
+                  setValues(saved);
+                  setError("");
+                  setCheckResult("");
+                }}
+              >
+                撤销更改
+              </Button>
+              <span role="status" className="fp-muted">
+                {dirty ? "有未保存的更改" : "所有更改已保存"}
+              </span>
+            </div>
           </form>
         )
       )}

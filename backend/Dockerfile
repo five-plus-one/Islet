@@ -5,7 +5,8 @@ FROM --platform=$BUILDPLATFORM node:22-alpine AS admin_builder
 WORKDIR /src/frontend/admin
 COPY frontend/admin/package*.json ./
 COPY frontend/admin/vendor ./vendor
-RUN npm ci
+ARG NPM_CONFIG_LOGLEVEL=warn
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 COPY frontend/admin/ ./
 RUN npm run build
 
@@ -24,6 +25,10 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/islet ./cmd
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/importlsky ./cmd/importlsky
 
 FROM alpine:3.24.3
+
+LABEL org.opencontainers.image.source="https://github.com/five-plus-one/Islet" \
+      org.opencontainers.image.licenses="GPL-3.0-only"
+COPY LICENSE THIRD_PARTY_NOTICES.md /usr/share/licenses/islet/
 
 RUN apk add --no-cache tzdata ca-certificates \
     && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \

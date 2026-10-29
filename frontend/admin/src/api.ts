@@ -392,6 +392,8 @@ export const api = {
     }>("/api/admin/stats/groups"),
 
   settings: () => request<Record<string, string>>("/api/admin/settings"),
+  loginDefaults: () =>
+    request<Record<string, string>>("/api/admin/settings/login-defaults"),
   saveSettings: (values: Record<string, string>) =>
     request<Record<string, string>>("/api/admin/settings", {
       method: "PUT",

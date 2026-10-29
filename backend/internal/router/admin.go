@@ -395,6 +395,19 @@ func registerSettingsRoutes(admin *gin.RouterGroup, deps *Deps) {
 		}
 		response.OK(c, values)
 	})
+	admin.GET("/settings/login-defaults", func(c *gin.Context) {
+		scopes := strings.TrimSpace(deps.Cfg.OIDCScopes)
+		if scopes == "" {
+			scopes = "openid profile email"
+		}
+		response.OK(c, gin.H{
+			"auth.oidc_issuer":    deps.Cfg.OIDCIssuer,
+			"auth.oidc_client_id": deps.Cfg.OIDCClientID,
+			"auth.oidc_audience":  deps.Cfg.OIDCAudience,
+			"auth.oidc_scopes":    scopes,
+			"redirect_uri":        adminBaseURL(deps.Cfg, c.Request) + "/auth/callback",
+		})
+	})
 	admin.PUT("/settings", func(c *gin.Context) {
 		user, _ := middleware.CurrentUser(c)
 		var in map[string]string

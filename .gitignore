@@ -24,3 +24,8 @@ deploy/.env
 
 # 日志
 *.log
+
+workspace/security-tools/
+workspace/public-release/
+
+workspace/

@@ -30,6 +30,8 @@ import {
   Menu,
   LogOut,
   Layers,
+  Github,
+  ArrowUpRight,
 } from "lucide-react";
 import {
   api,
@@ -65,6 +67,14 @@ const navigation = [
   ["/users", "用户管理", Users],
   ["/settings", "系统设置", Settings],
 ] as const;
+function RepositoryLink() {
+  return <a className="fp-button fp-ghost" href="https://github.com/five-plus-one/Islet"
+    target="_blank" rel="noopener noreferrer" data-fp-tooltip="在 GitHub 查看源码（新窗口）"
+    aria-label="在 GitHub 查看源码（新窗口）"
+    style={{textDecoration:"none",justifyContent:"flex-start",width:"fit-content"}}>
+    <Github size={18} aria-hidden="true" /><span>GitHub</span><ArrowUpRight size={14} aria-hidden="true" />
+  </a>;
+}
 export function App() {
   const installation = useLoad(api.setupStatus);
   const current = useLocation();
@@ -214,7 +224,7 @@ function Login({ theme }: { theme: React.ReactNode }) {
           </div>
         )
       )}
-      <p><a href="https://github.com/five-plus-one/Islet" target="_blank" rel="noopener noreferrer">Islet · GitHub 开源项目</a></p>
+      <p><RepositoryLink /></p>
     </AppEntryLayout>
   );
 }
@@ -364,13 +374,7 @@ function Workspace({ theme }: { theme: React.ReactNode }) {
         }}
       />
       <footer className="islet-capacity">
-        <a
-          href="https://github.com/five-plus-one/Islet"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          GitHub · Islet 开源项目
-        </a>
+        <RepositoryLink />
         <span>我的空间</span>
         <strong>
           {humanBytes(me.quota.used)}{" "}

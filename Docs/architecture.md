@@ -13,7 +13,7 @@ Islet 由单个 Go 二进制承载全部服务，单容器双端口部署，前�
                     │  GET  /api/v1/health                │   local / s3(OSS等)
                     ├────────────────────────────────────┤
  管理员 / 用户 ─────▶│ :8081 管理端口                       │
- (管理端 SPA)        │  管理界面（嵌入的 Vue SPA）           │──▶ MySQL 8
+ (管理端 SPA)        │  管理界面（嵌入的 React SPA）           │──▶ MySQL 8
                     │  /api/v1/*   业务 API（会话/OIDC）   │──▶ Redis 7
                     │  /api/admin/* 管理 API（admin+）     │
                     │  /api/setup/* 初始化向导（仅此端口）   │
@@ -25,7 +25,7 @@ Islet 由单个 Go 二进制承载全部服务，单容器双端口部署，前�
 | 层 | 技术 |
 |----|------|
 | 后端 | Go、Gin、GORM、go-redis、minio-go、golang.org/x/image |
-| 前端 | Vue 3、TypeScript、Vite、Naive UI、Pinia、ECharts |
+| 前端 | React 19、TypeScript、Vite、5plus1-ui |
 | 存储 | MySQL 8（业务数据）、Redis 7（限流/缓存）、对象存储（图片） |
 | 部署 | Docker / Docker Compose，预构建镜像 `5plus1/islet` |
 

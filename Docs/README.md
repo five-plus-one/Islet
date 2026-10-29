@@ -9,7 +9,9 @@
 | [api-overview.md](api-overview.md) | API 设计规范与全部端点 |
 | [setup.md](setup.md) | 初始化向导状态机与安全边界 |
 | [storage.md](storage.md) | 存储策略：驱动抽象、密钥加密、URL 生成 |
+| [shared-ui-deployment.md](shared-ui-deployment.md) | 共享组件、账户与图库迁移方案 |
+| [acceptance-2026-10-29.md](acceptance-2026-10-29.md) | React 工作台、公网发布与恢复记录 |
 
 ## 项目状态
 
-当前阶段：**工作台设计与本地账户业务验收完成**。实时进度见 `workspace/status.md`。
+当前阶段：**React 工作台、OAuth、图库迁移与公网发布完成**。实时进度见 `workspace/status.md`。

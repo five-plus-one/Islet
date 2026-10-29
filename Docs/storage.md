@@ -55,3 +55,6 @@ key 全程校验：禁止 `..`、反斜杠、绝对路径；local 驱动写入�
 4. 去重：`(user_id, sha256)` 已存在（未删除）→ 直接返回既有记录（PicGo 响应同）。
 5. 写入：原图 + 缩略图（最长边 480px，不透明 JPEG q82 / 含透明 PNG）。
 6. 落库固化最终 URL；策略删除/切换不影响既有 URL。
+
+## OSS 条件写入
+OSS 使用原生 PutObject 的 x-oss-forbid-overwrite 防覆盖请求；普通 S3 使用 If-None-Match。连接检查复用实际上传并回读校验。参考：https://www.alibabacloud.com/help/en/oss/developer-reference/putobject 。

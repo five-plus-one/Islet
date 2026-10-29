@@ -1,6 +1,6 @@
 # Islet
 
-Islet 是一个自托管多用户图床，基于 Go + Vue 3 构建。标准 OIDC 单点登录（PKCE）、本地管理员账号、用户分组配额、多存储策略（本地磁盘 / 阿里云 OSS / S3 兼容对象存储）、PicGo 兼容上传 API、回收站与统计看板。单容器双端口部署，前端嵌入 Go 二进制。
+Islet 是一个自托管多用户图床，基于 Go + React 19 构建。标准 OIDC 单点登录（PKCE）、本地管理员账号、用户分组配额、多存储策略（本地磁盘 / 阿里云 OSS / S3 兼容对象存储）、PicGo 兼容上传 API、回收站与统计看板。单容器双端口部署，前端嵌入 Go 二进制。
 
 ## 功能
 
@@ -17,7 +17,7 @@ Islet 是一个自托管多用户图床，基于 Go + Vue 3 构建。标准 OIDC
 | 层 | 技术 |
 |----|------|
 | 后端 | Go、Gin、GORM、minio-go、go-redis |
-| 前端 | Vue 3、TypeScript、Vite、Naive UI、Pinia |
+| 前端 | React 19、TypeScript、Vite、5plus1-ui |
 | 存储 | MySQL 8（业务数据）、Redis 7（可选：上传限流）、对象存储（图片） |
 | 部署 | Docker / Docker Compose，单容器双端口 |
 

@@ -45,6 +45,9 @@ func TestS3Integration(t *testing.T) {
 	if got != "http://127.0.0.1:28090/i/"+key {
 		t.Fatal("unexpected image URL")
 	}
+	if _, err := d.Put(ctx, key, bytes.NewReader([]byte("replacement")), 11, "image/png"); err == nil {
+		t.Fatal("existing object must not be overwritten")
+	}
 	r, size, err := d.Read(ctx, key)
 	if err != nil {
 		t.Fatal(err)

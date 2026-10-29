@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -507,6 +508,11 @@ func registerAuthRoutes(api *gin.RouterGroup, deps *Deps) {
 		if redirectURI == "" {
 			redirectURI = adminBaseURL(cfg, c.Request) + "/auth/callback"
 		}
+		base := strings.TrimRight(adminBaseURL(cfg, c.Request), "/")
+		if redirectURI != base+"/auth/callback" && redirectURI != base+"/setup/auth/callback" {
+			response.BadRequest(c, "登录回调地址不匹配")
+			return
+		}
 		form := url.Values{
 			"grant_type":    {"authorization_code"},
 			"code":          {in.Code},
@@ -514,28 +520,38 @@ func registerAuthRoutes(api *gin.RouterGroup, deps *Deps) {
 			"client_id":     {effective.ClientID},
 			"redirect_uri":  {redirectURI},
 		}
+		if secret := os.Getenv("OIDC_CLIENT_SECRET"); secret != "" && effective.ClientID == os.Getenv("OIDC_CLIENT_ID") {
+			form.Set("client_secret", secret)
+		}
 		tokenResp, err := exchangeToken(c.Request.Context(), meta.TokenEndpoint, form)
 		if err != nil {
 			response.Unauthorized(c, "授权码交换失败："+err.Error())
 			return
 		}
-		// 校验 access token 可验签且主体一致
-		audience := effective.Audience
-		if audience == "" {
-			audience = effective.ClientID
-		}
-		identity, err := deps.OIDC.Verify(c.Request.Context(), tokenResp.AccessToken, service.VerifyOptions{
-			Issuer: effective.Issuer, Audience: audience,
+		// OIDC identity is carried by the ID token; access tokens may be opaque.
+		identity, err := deps.OIDC.Verify(c.Request.Context(), tokenResp.IDToken, service.VerifyOptions{
+			Issuer: effective.Issuer, Audience: effective.ClientID,
 		})
 		if err != nil {
 			response.Unauthorized(c, "令牌验证失败："+err.Error())
 			return
 		}
-		// 首登预建档，让管理员在用户列表立刻看到
 		if deps.Auth != nil {
-			if _, err := deps.Auth.ProvisionOIDC(identity); err != nil {
-				deps.Logger.Warn("provision oidc user failed", "error", err)
+			user, err := deps.Auth.ProvisionOIDC(identity)
+			if err != nil {
+				response.Forbidden(c, "账号暂时无法使用，请联系管理员")
+				return
 			}
+			_, session, err := deps.Auth.CreateSession(user)
+			if err != nil {
+				response.Forbidden(c, "账号尚未获准访问，请联系管理员")
+				return
+			}
+			secure := c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
+			c.SetSameSite(http.SameSiteLaxMode)
+			c.SetCookie(middleware.LocalSessionCookie, session, int((12 * time.Hour).Seconds()), "/", "", secure, true)
+			response.OK(c, gin.H{"access_token": "", "id_token": "", "expires_in": int((12 * time.Hour).Seconds()), "username": identity.Username})
+			return
 		}
 		response.OK(c, gin.H{
 			"access_token": tokenResp.AccessToken,

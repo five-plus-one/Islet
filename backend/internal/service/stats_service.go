@@ -91,8 +91,8 @@ func (s *StatsService) Trend(days int) ([]TrendPoint, error) {
 	start := time.Now().AddDate(0, 0, -(days - 1)).Format("2006-01-02")
 	var rows []TrendPoint
 	if err := s.db.Raw(
-		"SELECT DATE(created_at) AS date, COUNT(*) AS count, COALESCE(SUM(size),0) AS bytes "+
-			"FROM images WHERE deleted_at IS NULL AND DATE(created_at) >= ? GROUP BY DATE(created_at) ORDER BY date", start,
+		"SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS date, COUNT(*) AS count, COALESCE(SUM(size),0) AS bytes "+
+			"FROM images WHERE deleted_at IS NULL AND DATE(created_at) >= ? GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d') ORDER BY date", start,
 	).Scan(&rows).Error; err != nil {
 		return nil, err
 	}

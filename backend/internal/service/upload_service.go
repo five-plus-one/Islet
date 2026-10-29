@@ -356,6 +356,8 @@ func (s *UploadService) usedBytes(userID uint64) (uint64, error) {
 func (s *UploadService) UsedBytes(userID uint64) (uint64, error) { return s.usedBytes(userID) }
 
 // buildThumb 生成最长边 480px 的缩略图；不适用时返回 false。
+func BuildThumbnail(data []byte) ([]byte, bool) { return buildThumb(data) }
+
 func buildThumb(data []byte) ([]byte, bool) {
 	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {

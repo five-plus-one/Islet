@@ -188,6 +188,14 @@ func (s *AuthService) LoginLocal(username, password string) (model.User, string,
 	if user.Status != model.StatusActive {
 		return user, "", ErrAccountUnavailable
 	}
+	return s.CreateSession(user)
+}
+
+// CreateSession creates an interactive session after the identity has been verified.
+func (s *AuthService) CreateSession(user model.User) (model.User, string, error) {
+	if user.Status != model.StatusActive {
+		return user, "", ErrAccountUnavailable
+	}
 	token, hash, err := newSessionToken()
 	if err != nil {
 		return user, "", err

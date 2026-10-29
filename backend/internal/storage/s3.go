@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/url"
 	"path"
@@ -125,6 +126,10 @@ func (d *S3) objectKey(key string) string {
 }
 
 func (d *S3) Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) (string, error) {
+	endpoint, _ := url.Parse(d.cfg.Endpoint)
+	if endpoint != nil && strings.HasSuffix(endpoint.Hostname(), ".aliyuncs.com") && strings.HasPrefix(endpoint.Hostname(), "s3.oss-") {
+		return d.putOSS(ctx, key, r, size, contentType)
+	}
 	client, err := d.client()
 	if err != nil {
 		return "", err
@@ -223,23 +228,26 @@ func (d *S3) publicURL(key string) string {
 }
 
 func (d *S3) Check(ctx context.Context) error {
-	client, err := d.client()
-	if err != nil {
-		return err
-	}
 	// 探测图：64x64 纯色 PNG
 	png := buildProbePNG()
 	name := ".islet-check/" + probeName() + ".png"
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if _, err = client.PutObject(ctx, d.cfg.Bucket, d.objectKey(name), bytes.NewReader(png), int64(len(png)),
-		minio.PutObjectOptions{ContentType: "image/png", DisableMultipart: true, DisableContentSha256: true, SendContentMd5: true}); err != nil {
-		return TranslateError(err)
+	if _, err := d.Put(ctx, name, bytes.NewReader(png), int64(len(png)), "image/png"); err != nil {
+		return err
 	}
-	if err := client.RemoveObject(ctx, d.cfg.Bucket, d.objectKey(name), minio.RemoveObjectOptions{}); err != nil {
-		return TranslateError(err)
+	reader, _, err := d.Read(ctx, name)
+	if err != nil {
+		_ = d.Delete(ctx, name)
+		return err
 	}
-	return nil
+	actual, readErr := io.ReadAll(io.LimitReader(reader, int64(len(png))+1))
+	reader.Close()
+	deleteErr := d.Delete(ctx, name)
+	if readErr != nil || !bytes.Equal(actual, png) {
+		return ErrStorage
+	}
+	return deleteErr
 }
 
 func probeName() string {
@@ -253,8 +261,9 @@ func probeName() string {
 // TranslateError 把 minio/S3 错误翻译为可操作的中文提示。
 func TranslateError(err error) error {
 	r := minio.ToErrorResponse(err)
+	slog.Warn("object storage request failed", "code", r.Code, "http_status", r.StatusCode)
 	switch r.Code {
-	case "PreconditionFailed":
+	case "PreconditionFailed", "FileAlreadyExists":
 		return errorsNew("文件名已被使用，请重新上传")
 	case "NoSuchBucket":
 		return errorsNew("存储桶不存在，请检查 Bucket 名称和地域")

@@ -15,3 +15,6 @@
 ## 项目状态
 
 当前阶段：**React 工作台、OAuth、图库迁移与公网发布完成**。实时进度见 `workspace/status.md`。
+
+- [系统设置使用说明](settings.md)
+- [设置体验与公开发行](settings-experience.md)

@@ -9,19 +9,25 @@ import { resolve } from "node:path";
 import { deflateSync } from "node:zlib";
 
 const root = resolve(process.cwd(), "../..");
-const credentials = JSON.parse(
-  execFileSync(
-    "powershell.exe",
-    [
-      "-NoProfile",
-      "-Command",
-      `Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1"; $s=Get-Content -LiteralPath '${root.replace(/'/g, "''")}\\workspace\\acceptance.key' | ConvertTo-SecureString; [System.Net.NetworkCredential]::new('', $s).Password`,
-    ],
-    { encoding: "utf8" },
-  ),
-);
+const credentials =
+  process.env.ISLET_TEST_USERNAME && process.env.ISLET_TEST_PASSWORD
+    ? {
+        username: process.env.ISLET_TEST_USERNAME,
+        password: process.env.ISLET_TEST_PASSWORD,
+      }
+    : JSON.parse(
+        execFileSync(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-Command",
+            `Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1"; $s=Get-Content -LiteralPath '${root.replace(/'/g, "''")}\\workspace\\acceptance.key' | ConvertTo-SecureString; [System.Net.NetworkCredential]::new('', $s).Password`,
+          ],
+          { encoding: "utf8" },
+        ),
+      );
 const baseURL = process.env.ISLET_TEST_URL || "http://127.0.0.1:28091";
-const publicURL = "http://127.0.0.1:28090";
+const publicURL = process.env.ISLET_TEST_PUBLIC_URL || "http://127.0.0.1:28090";
 const suffix = Date.now().toString(36);
 let owner: APIRequestContext,
   member: APIRequestContext,
@@ -160,6 +166,29 @@ test.describe.serial("Account and storage API acceptance", () => {
         })
       ).status(),
     ).toBe(400);
+    expect(
+      (await anon.get("/api/admin/settings/login-defaults")).status(),
+    ).toBe(401);
+    const defaults = await call(owner, "/api/admin/settings/login-defaults");
+    expect(Object.keys(defaults).sort()).toEqual([
+      "auth.oidc_audience",
+      "auth.oidc_client_id",
+      "auth.oidc_issuer",
+      "auth.oidc_scopes",
+      "redirect_uri",
+    ]);
+    expect(defaults["auth.oidc_scopes"]).toBe("openid profile email");
+    const original = await call(owner, "/api/admin/settings");
+    const updated = await call(owner, "/api/admin/settings", "PUT", {
+      "site.title": "Settings review",
+    });
+    for (const key of Object.keys(original).filter(
+      (key) => key !== "site.title",
+    ))
+      expect(updated[key]).toBe(original[key]);
+    await call(owner, "/api/admin/settings", "PUT", {
+      "site.title": original["site.title"],
+    });
     group = await call(owner, "/api/admin/user-groups", "POST", {
       name: "验收成员-" + suffix,
       quota_bytes: 10485760,
@@ -196,6 +225,7 @@ test.describe.serial("Account and storage API acceptance", () => {
     for (const path of [
       "/api/admin/users",
       "/api/admin/settings",
+      "/api/admin/settings/login-defaults",
       "/api/admin/storage-policies",
       "/api/admin/user-groups",
       "/api/admin/stats/overview",

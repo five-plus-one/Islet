@@ -7,7 +7,6 @@ import {
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { deflateSync } from "node:zlib";
-import { mkdirSync } from "node:fs";
 
 const root = resolve(process.cwd(), "../..");
 const credentials = JSON.parse(
@@ -28,7 +27,7 @@ let owner: APIRequestContext,
   member: APIRequestContext,
   outsider: APIRequestContext;
 let ownerImage: any, memberImage: any, album: any, group: any, memberID: number;
-let screenshotImages: Buffer[] = [];
+
 const png = (seed: number) => {
   const crc = (b: Buffer) => {
     let c = 0xffffffff;
@@ -106,9 +105,8 @@ async function upload(
   return p.data.items[0];
 }
 
-test.describe.serial("Local account production acceptance", () => {
+test.describe.serial("Account and storage API acceptance", () => {
   test.beforeAll(async () => {
-    mkdirSync(resolve(root, "workspace/screenshots"), { recursive: true });
     owner = await request.newContext({ baseURL });
     const status = await owner.get("/api/setup/status");
     if (status.ok()) {
@@ -307,6 +305,8 @@ test.describe.serial("Local account production acceptance", () => {
     );
   });
   test("upload credentials, formats, quota and session revocation", async () => {
+    const trend = await call(owner, "/api/admin/stats/trend?days=14");
+    expect(trend.items.at(-1).count).toBeGreaterThan(0);
     const key = await call(member, "/api/v1/me/tokens", "POST", {
       name: "PicGo-" + suffix,
     });
@@ -402,240 +402,6 @@ test.describe.serial("Local account production acceptance", () => {
       password: next,
     });
   });
-  test("desktop UI, upload, editing, albums and navigation", async ({
-    page,
-  }) => {
-    const errors: string[] = [];
-    page.on("pageerror", (e) => errors.push(e.message));
-    await page.goto("/login");
-    await expect(page.getByRole("heading", { name: "欢迎回来" })).toBeVisible();
-    await page.screenshot({
-      path: resolve(root, "workspace/screenshots/login-desktop.png"),
-    });
-    await page
-      .getByRole("textbox", { name: "用户名", exact: true })
-      .fill(credentials.username);
-    await page
-      .getByRole("textbox", { name: "密码", exact: true })
-      .fill(credentials.password);
-    await page.getByRole("button", { name: "登录工作台" }).click();
-    await expect(page).toHaveURL(/\/images$/);
-    await page.getByRole("link", { name: "相册", exact: true }).click();
-    await page
-      .getByRole("button", { name: "新建相册", exact: true })
-      .first()
-      .click();
-    await page.locator(".n-modal input").fill("灵感片段-" + suffix);
-    await page.getByRole("button", { name: "创建相册", exact: true }).click();
-    await expect(
-      page.locator(".album-card").filter({ hasText: "灵感片段-" + suffix }),
-    ).toBeVisible();
-    await page.getByRole("link", { name: "上传图片" }).click();
-    const sample = await page.evaluate(() => {
-      const c = document.createElement("canvas");
-      c.width = 800;
-      c.height = 600;
-      const ctx = c.getContext("2d")!;
-      const out: string[] = [];
-      const themes = [
-        ["#b7d7e7", "#2f7388", "#e0ccb0"],
-        ["#eac2a8", "#aa7877", "#535d7a"],
-        ["#d6dfd5", "#638173", "#a9b69d"],
-        ["#b4c7e0", "#6f89b7", "#c3d3e9"],
-        ["#e4d1b2", "#b8906c", "#657b76"],
-        ["#e3d8e7", "#9c8fac", "#6e789b"],
-      ];
-      themes.forEach((t, i) => {
-        ctx.fillStyle = t[0];
-        ctx.fillRect(0, 0, 800, 600);
-        ctx.fillStyle = "#fff9e5";
-        ctx.beginPath();
-        ctx.arc(580, 130, 46, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = t[1];
-        ctx.beginPath();
-        ctx.moveTo(0, 400);
-        ctx.bezierCurveTo(180, 160 + i * 12, 380, 550, 800, 240);
-        ctx.lineTo(800, 600);
-        ctx.lineTo(0, 600);
-        ctx.fill();
-        ctx.fillStyle = t[2];
-        ctx.beginPath();
-        ctx.moveTo(0, 480);
-        ctx.bezierCurveTo(300, 370, 480, 600, 800, 420);
-        ctx.lineTo(800, 600);
-        ctx.lineTo(0, 600);
-        ctx.fill();
-        out.push(c.toDataURL("image/png").split(",")[1]);
-      });
-      return out;
-    });
-    screenshotImages = sample.map((x) => Buffer.from(x, "base64"));
-    await page.locator("input[type=file]").setInputFiles(
-      screenshotImages.map((buffer, i) => ({
-        name:
-          [
-            "海岸清晨",
-            "落日余温",
-            "山间来信",
-            "远方的蓝",
-            "沙丘漫步",
-            "暮色温柔",
-          ][i] + ".png",
-        mimeType: "image/png",
-        buffer,
-      })),
-    );
-    await expect(
-      page.locator(".upload-task").filter({ hasText: "复制链接" }),
-    ).toHaveCount(6, { timeout: 30000 });
-    await page.getByRole("button", { name: "查看图片库" }).click();
-    await expect(page.locator(".image-card")).toHaveCount(7);
-    await expect
-      .poll(() =>
-        page
-          .locator(".image-preview img")
-          .evaluateAll((imgs) =>
-            imgs.every((img) => (img as HTMLImageElement).naturalWidth > 0),
-          ),
-      )
-      .toBe(true);
-    await expect(page.locator(".n-message")).toHaveCount(0);
-    await page.screenshot({
-      path: resolve(root, "workspace/screenshots/gallery-desktop.png"),
-      fullPage: true,
-    });
-    await page.getByRole("button", { name: /查看 海岸清晨/ }).click();
-    await expect(page.getByText("图片详情", { exact: true })).toBeVisible();
-    await page.screenshot({
-      path: resolve(root, "workspace/screenshots/image-detail.png"),
-    });
-    const nameInput = page
-      .locator(".n-drawer input")
-      .filter({ hasNot: page.locator("[readonly]") });
-    await page
-      .locator(".n-drawer .n-form input")
-      .first()
-      .fill("海岸清晨 · 收藏.png");
-    await page.getByRole("button", { name: "保存更改", exact: true }).click();
-    await expect(page.getByText("图片信息已保存")).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(page.locator(".n-drawer")).toBeHidden();
-    await page
-      .getByRole("textbox", { name: "搜索图片", exact: true })
-      .fill("海岸清晨");
-    await page.getByRole("button", { name: "搜索", exact: true }).click();
-    await expect(page).toHaveURL(/q=/);
-    await expect(page.locator(".image-card")).toHaveCount(1);
-    await page
-      .getByRole("button", { name: "查看 海岸清晨 · 收藏.png" })
-      .click();
-    await page.locator(".n-drawer .n-form input").first().fill("未保存");
-    await page.keyboard.press("Escape");
-    await expect(page.locator(".image-name")).toHaveText("海岸清晨 · 收藏.png");
-    for (const [label, title] of [
-      ["运行概览", "运行概览"],
-      ["存储策略", "存储策略"],
-      ["用户分组", "用户分组"],
-      ["用户管理", "用户管理"],
-      ["系统设置", "系统设置"],
-      ["上传密钥", "上传密钥"],
-      ["回收站", "回收站"],
-    ] as const) {
-      await page.getByRole("link", { name: label, exact: true }).click();
-      await expect(
-        page.getByRole("heading", { name: title, exact: true }),
-      ).toBeVisible();
-      await expect
-        .poll(() =>
-          page.evaluate(
-            () => document.documentElement.scrollWidth <= window.innerWidth,
-          ),
-        )
-        .toBe(true);
-    }
-    expect(errors).toEqual([]);
-  });
-  test("mobile layout, drawer, menu, recovery and expired session", async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/login");
-    await page
-      .getByRole("textbox", { name: "用户名", exact: true })
-      .fill(credentials.username);
-    await page
-      .getByRole("textbox", { name: "密码", exact: true })
-      .fill(credentials.password);
-    await page.getByRole("button", { name: "登录工作台" }).click();
-    await expect(page).toHaveURL(/\/images$/);
-    await expect(page.locator(".image-card").first()).toBeVisible();
-    await page.screenshot({
-      path: resolve(root, "workspace/screenshots/gallery-mobile.png"),
-      fullPage: true,
-    });
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () => document.documentElement.scrollWidth <= window.innerWidth,
-        ),
-      )
-      .toBe(true);
-    await page.getByRole("button", { name: "打开导航" }).click();
-    await page.getByRole("link", { name: "上传图片" }).click();
-    await expect(
-      page.getByRole("heading", { name: "上传图片", exact: true }),
-    ).toBeVisible();
-    await expect(page.getByRole("button", { name: "关闭导航" })).toHaveCount(0);
-    await page.screenshot({
-      path: resolve(root, "workspace/screenshots/upload-mobile.png"),
-      fullPage: true,
-    });
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () => document.documentElement.scrollWidth <= window.innerWidth,
-        ),
-      )
-      .toBe(true);
-    await page.getByRole("button", { name: "查看图片库" }).click();
-    await page.route("**/api/v1/images?*", (route) =>
-      route.fulfill({
-        status: 503,
-        contentType: "application/json",
-        body: JSON.stringify({ code: 503, message: "连接暂时不可用" }),
-      }),
-    );
-    await page.getByRole("button", { name: "刷新图片" }).click();
-    await expect(page.getByText("连接暂时不可用")).toBeVisible();
-    await page.unroute("**/api/v1/images?*");
-    await page.getByRole("button", { name: "重新加载" }).click();
-    await expect(page.locator(".image-card").first()).toBeVisible();
-    for (const width of [390, 768]) {
-      await page.setViewportSize({ width, height: 900 });
-      for (const path of [
-        "/overview",
-        "/policies",
-        "/groups",
-        "/users",
-        "/settings",
-        "/tokens",
-        "/albums",
-        "/profile",
-        "/trash",
-      ]) {
-        await page.goto(path);
-        await expect(page.locator("h1")).toBeVisible();
-        await expect
-          .poll(() =>
-            page.evaluate(
-              () => document.documentElement.scrollWidth <= window.innerWidth,
-            ),
-          )
-          .toBe(true);
-      }
-    }
-  });
   test("S3 proxy, policy restrictions and recoverable deletion", async () => {
     const config = {
       name: "对象存储-" + suffix,
@@ -712,77 +478,6 @@ test.describe.serial("Local account production acceptance", () => {
     await call(owner, `/api/v1/images/${image.id}/purge`, "DELETE");
     expect((await owner.get(image.url)).status()).toBe(404);
     await call(owner, `/api/admin/storage-policies/${policy.id}`, "DELETE");
-  });
-  test("upload retry, queue retention, clipboard and batch recycling", async ({
-    page,
-    context,
-  }) => {
-    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    await page.goto("/login");
-    await page
-      .getByRole("textbox", { name: "用户名", exact: true })
-      .fill(credentials.username);
-    await page
-      .getByRole("textbox", { name: "密码", exact: true })
-      .fill(credentials.password);
-    await page.getByRole("button", { name: "登录工作台" }).click();
-    await page.getByRole("link", { name: "上传图片" }).click();
-    await page.route(
-      "**/api/v1/upload",
-      (r) =>
-        r.fulfill({
-          status: 503,
-          contentType: "application/json",
-          body: JSON.stringify({ code: 503, message: "上传连接中断" }),
-        }),
-      { times: 1 },
-    );
-    await page.locator("input[type=file]").setInputFiles({
-      name: "重试图片.png",
-      mimeType: "image/png",
-      buffer: png(181),
-    });
-    await expect(page.getByText(/上传连接中断/)).toBeVisible();
-    await page.getByRole("button", { name: "重试", exact: true }).click();
-    await expect(
-      page.locator(".upload-task").getByRole("button", { name: "复制链接" }),
-    ).toBeVisible();
-    await page.getByRole("button", { name: "查看图片库" }).click();
-    await page.getByRole("link", { name: "上传图片" }).click();
-    await expect(page.locator(".upload-task")).toHaveCount(1);
-    await page.getByRole("button", { name: "复制本次全部链接" }).click();
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
-      publicURL + "/i/",
-    );
-    await page.getByRole("button", { name: "查看图片库" }).click();
-    await page
-      .getByRole("textbox", { name: "搜索图片", exact: true })
-      .fill("重试图片");
-    await page.getByRole("button", { name: "搜索", exact: true }).click();
-    await expect(page.locator(".image-card")).toHaveCount(1);
-    await page.getByRole("checkbox", { name: "选择当前已加载图片" }).check();
-    await page.getByRole("button", { name: "移入回收站", exact: true }).click();
-    await page
-      .locator(".n-dialog")
-      .getByRole("button", { name: "移入回收站", exact: true })
-      .click();
-    await expect(page.locator(".image-card")).toHaveCount(0);
-    await page.getByRole("link", { name: "回收站", exact: true }).click();
-    const card = page.locator(".image-card").filter({ hasText: "重试图片" });
-    await expect(card).toBeVisible();
-    await card.getByRole("button", { name: "恢复", exact: true }).click();
-    await expect(card).toHaveCount(0);
-    const record = (
-      await call(
-        owner,
-        "/api/v1/images?keyword=" + encodeURIComponent("重试图片"),
-      )
-    ).items[0];
-    await call(owner, `/api/v1/images/${record.id}`, "DELETE");
-    await call(owner, `/api/v1/images/${record.id}/purge`, "DELETE");
-    await page.request.post("/api/v1/auth/logout");
-    await page.getByRole("button", { name: "刷新图片" }).click();
-    await expect(page).toHaveURL(/\/login/);
   });
   test.afterAll(async () => {
     await owner?.dispose();

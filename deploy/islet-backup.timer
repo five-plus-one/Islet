@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Islet backup
+
+[Timer]
+OnCalendar=*-*-* 03:40:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -70,3 +70,13 @@
 ## GitHub 归档（2026-10-13）
 
 - 成果按产品文档、后端、前端、自动化验收四批提交；GitHub 私有仓库：https://github.com/five-plus-one/Islet，主分支 main。
+
+## 共享 UI 与公网发布（2026-10-29）
+
+- 正在核对共享组件发布、OAuth 应用和 img.five-plus-one.com 现有路由，准备重构及上线方案。
+
+- 已发布 React 19 / 5plus1-ui 0.5.76 工作台，正式镜像 production-20261029.03。
+- OAuth 与本地登录已实测；23 张旧图原链接保留，预览生成完成。
+- 旧 Lsky 已停用，其余 20 个原运行容器 ID 保持；每日备份与健康检查已启用。
+- 验收与恢复：Docs/acceptance-2026-10-29.md。交付按设计、后端、React 工作台和上线验收分批归档到既有 GitHub 私有仓库。
+

@@ -107,3 +107,6 @@ server {
 | OSS 上传报地域不匹配 | Endpoint 需为 `oss-<region>.aliyuncs.com`，Region 填 `<region>`（自动归一化并校验） |
 | S3 策略解密失败 | 数据卷与主密钥不同步（只迁库未迁卷）；重新填写 Secret Key 保存即可 |
 | 图片 404 | 检查图片所属策略是否停用；本地策略文件是否在 `islet_data` 卷中 |
+
+## img.five-plus-one.com
+生产目录 /opt/islet-production；独立数据库 islet，既有 db-network；本地恢复凭据位于 root 专用 credentials.json。每日数据库、运行配置及主密钥备份由 islet-backup.timer 执行；恢复时同时保留 OSS 原对象与配置主密钥。

@@ -1,0 +1,9 @@
+[Unit]
+Description=Islet database and configuration backup
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/islet-backup
+UMask=0077
+Nice=10

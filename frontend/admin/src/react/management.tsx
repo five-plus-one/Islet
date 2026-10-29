@@ -322,7 +322,7 @@ function Settings() {
                             effective("auth.oidc_issuer"),
                           );
                           setCheckResult(
-                            "服务地址可访问。请保存后通过实际登录确认应用授权配置。",
+                            "服务地址可访问。此检查仅验证连接，请通过实际登录确认应用授权配置。",
                           );
                         } catch (e) {
                           setError(errorText(e));

@@ -18,3 +18,5 @@
 
 - [系统设置使用说明](settings.md)
 - [设置体验与公开发行](settings-experience.md)
+
+- [设置体验与开源发行验收](acceptance-settings-2026-10-29.md)

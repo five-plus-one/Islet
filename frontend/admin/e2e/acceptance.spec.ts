@@ -254,6 +254,11 @@ test.describe.serial("Account and storage API acceptance", () => {
       group_id: group.ID,
     });
     memberID = user.id;
+    await call(owner, `/api/admin/users/${memberID}/group`, "PATCH", {group_id:group.ID});
+    await call(owner, `/api/admin/users/${memberID}/role`, "PATCH", {role:"admin"});
+    expect((await call(owner,"/api/admin/users")).items.find((x:any) => x.id === memberID).role).toBe("admin");
+    await call(owner, `/api/admin/users/${memberID}/role`, "PATCH", {role:"user"});
+
     await call(owner, "/api/admin/users", "POST", {
       username: "outsider-" + suffix,
       password: credentials.password,

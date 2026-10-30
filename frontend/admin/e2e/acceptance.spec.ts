@@ -142,6 +142,47 @@ test.describe.serial("Account and storage API acceptance", () => {
     await login(owner, credentials.username);
   });
   test("authentication, settings, groups and user isolation", async () => {
+    const currentOwner = await call(owner, "/api/v1/me");
+    const protectedKey = await call(owner, "/api/v1/me/tokens", "POST", {
+      name: "protected-" + suffix,
+    });
+    for (const [field, value] of [
+      ["status", "disabled"],
+      ["role", "user"],
+      ["group", 2],
+    ] as const) {
+      const payload =
+        field === "group" ? { group_id: value } : { [field]: value };
+      expect(
+        (
+          await owner.patch(
+            `/api/admin/users/${currentOwner.user.id}/${field}`,
+            { data: payload },
+          )
+        ).status(),
+      ).toBe(403);
+      expect((await owner.get("/api/v1/me")).status()).toBe(200);
+      expect(
+        (
+          await owner.patch(`/api/admin/users/999999999/${field}`, {
+            data: payload,
+          })
+        ).status(),
+      ).toBe(404);
+      expect(
+        (
+          await owner.patch(`/api/admin/users/not-a-number/${field}`, {
+            data: payload,
+          })
+        ).status(),
+      ).toBe(400);
+    }
+    const protectedTokens = await call(owner, "/api/v1/me/tokens");
+    expect(
+      protectedTokens.items.find((x: any) => x.id === protectedKey.item.id)
+        .status,
+    ).toBe("active");
+    await call(owner, `/api/v1/me/tokens/${protectedKey.item.id}`, "DELETE");
     const anon = await request.newContext({ baseURL });
     expect((await anon.get("/api/admin/users")).status()).toBe(401);
     expect(
@@ -413,14 +454,18 @@ test.describe.serial("Account and storage API acceptance", () => {
       policy_ids: [1],
       status: "active",
     });
+    const disabledKey = await call(member,"/api/v1/me/tokens","POST",{name:"disabled-"+suffix});
     await call(owner, `/api/admin/users/${memberID}/status`, "PATCH", {
       status: "disabled",
     });
+    expect((await call(owner,"/api/admin/users")).items.find((x:any) => x.id === memberID).status).toBe("disabled");
     expect((await member.get("/api/v1/me")).status()).toBe(401);
     await call(owner, `/api/admin/users/${memberID}/status`, "PATCH", {
       status: "active",
     });
+    expect((await member.get("/api/v1/me")).status()).toBe(401);
     await login(member, "member-" + suffix);
+    expect((await call(member,"/api/v1/me/tokens")).items.find((x:any) => x.id === disabledKey.item.id).status).toBe("disabled");
     const next = credentials.password + "x";
     await call(member, "/api/v1/me/password", "POST", {
       current_password: credentials.password,

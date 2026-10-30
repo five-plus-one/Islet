@@ -407,12 +407,17 @@ function Users() {
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const superAdmin = me.user.role === "super_admin";
-  async function change(fn: () => Promise<unknown>) {
+  async function change(
+    fn: () => Promise<unknown>,
+    message = "用户信息已更新",
+  ) {
+    if (busy) return;
     setBusy(true);
+    setError("");
     try {
       await fn();
       data.reload();
-      notify("用户信息已更新");
+      notify(message);
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -476,21 +481,32 @@ function Users() {
                         <small>{x.email}</small>
                       </td>
                       <td>
-                        <Choice
-                          label={`${x.username}的分组`}
-                          value={String(x.group_id)}
-                          onChange={(v) =>
-                            !busy &&
-                            void change(() => api.setUserGroup(x.id, Number(v)))
-                          }
-                          options={(groups.data?.items || []).map((g) => ({
-                            value: String(g.id),
-                            label: groupLabel(g.name),
-                          }))}
-                        />
+                        {x.role === "super_admin" ? (
+                          groupLabel(
+                            groups.data?.items.find((g) => g.id === x.group_id)
+                              ?.name || "管理员组",
+                          )
+                        ) : (
+                          <Choice
+                            label={`${x.username}的分组`}
+                            value={String(x.group_id)}
+                            onChange={(v) =>
+                              !busy &&
+                              void change(() =>
+                                api.setUserGroup(x.id, Number(v)),
+                              )
+                            }
+                            options={(groups.data?.items || []).map((g) => ({
+                              value: String(g.id),
+                              label: groupLabel(g.name),
+                            }))}
+                          />
+                        )}
                       </td>
                       <td>
-                        {superAdmin && x.id !== me.user.id ? (
+                        {superAdmin &&
+                        x.id !== me.user.id &&
+                        x.role !== "super_admin" ? (
                           <Choice
                             label={`${x.username}的角色`}
                             value={x.role}
@@ -501,7 +517,6 @@ function Users() {
                             options={[
                               { value: "user", label: "成员" },
                               { value: "admin", label: "管理员" },
-                              { value: "super_admin", label: "超级管理员" },
                             ]}
                           />
                         ) : x.role === "super_admin" ? (
@@ -520,23 +535,33 @@ function Users() {
                             : "已停用"}
                       </td>
                       <td>
-                        {x.id !== me.user.id && (
+                        {x.role === "super_admin" ? (
+                          <span className="fp-muted">账户受保护</span>
+                        ) : superAdmin && x.id !== me.user.id ? (
                           <Button
                             variant="secondary"
                             disabled={
                               busy || (!superAdmin && x.role !== "user")
                             }
                             onClick={() =>
-                              void change(() =>
-                                api.setUserStatus(
-                                  x.id,
-                                  x.status === "active" ? "disabled" : "active",
-                                ),
+                              void change(
+                                () =>
+                                  api.setUserStatus(
+                                    x.id,
+                                    x.status === "active"
+                                      ? "disabled"
+                                      : "active",
+                                  ),
+                                x.status === "active"
+                                  ? "用户已停用"
+                                  : "用户已启用",
                               )
                             }
                           >
                             {x.status === "active" ? "停用" : "启用"}
                           </Button>
+                        ) : (
+                          <span className="fp-muted">需超级管理员操作</span>
                         )}
                       </td>
                     </tr>

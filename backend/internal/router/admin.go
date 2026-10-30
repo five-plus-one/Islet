@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"islet/backend/internal/middleware"
 	"islet/backend/internal/model"
@@ -225,7 +226,6 @@ func registerUserRoutes(admin *gin.RouterGroup, deps *Deps) {
 
 	admin.PATCH("/users/:id/group", func(c *gin.Context) {
 		user, _ := middleware.CurrentUser(c)
-		id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 		var in struct {
 			GroupID uint64 `json:"group_id"`
 		}
@@ -237,9 +237,7 @@ func registerUserRoutes(admin *gin.RouterGroup, deps *Deps) {
 			response.BadRequest(c, "目标分组不存在")
 			return
 		}
-		if err := deps.DB.Model(&model.User{}).Where("id = ? AND role <> ?", id, model.UserRoleSuperAdmin).
-			Update("group_id", in.GroupID).Error; err != nil {
-			response.ServerError(c, "更新失败")
+		if !applyManagedUserChange(c, deps, "group_id", strconv.FormatUint(in.GroupID, 10)) {
 			return
 		}
 		deps.Audit.Record(&user.ID, "user.group", "user", c.Param("id"), gin.H{"group_id": in.GroupID}, clientIP(c))
@@ -287,14 +285,11 @@ func registerUserRoutes(admin *gin.RouterGroup, deps *Deps) {
 		var in struct {
 			Role string `json:"role"`
 		}
-		if err := c.ShouldBindJSON(&in); err != nil ||
-			(in.Role != model.UserRoleAdmin && in.Role != model.UserRoleUser) {
-			response.BadRequest(c, "role 须为 admin 或 user")
+		if err := c.ShouldBindJSON(&in); err != nil || (in.Role != model.UserRoleAdmin && in.Role != model.UserRoleUser) {
+			response.BadRequest(c, "请选择管理员或成员角色")
 			return
 		}
-		if err := deps.DB.Model(&model.User{}).Where("id = ? AND role <> ?", c.Param("id"), model.UserRoleSuperAdmin).
-			Update("role", in.Role).Error; err != nil {
-			response.ServerError(c, "更新失败")
+		if !applyManagedUserChange(c, deps, "role", in.Role) {
 			return
 		}
 		deps.Audit.Record(nil, "user.role", "user", c.Param("id"), gin.H{"role": in.Role}, clientIP(c))
@@ -304,33 +299,58 @@ func registerUserRoutes(admin *gin.RouterGroup, deps *Deps) {
 		var in struct {
 			Status string `json:"status"`
 		}
-		if err := c.ShouldBindJSON(&in); err != nil ||
-			(in.Status != model.StatusActive && in.Status != model.StatusDisabled && in.Status != model.StatusPending) {
-			response.BadRequest(c, "status 不合法")
+		if err := c.ShouldBindJSON(&in); err != nil || (in.Status != model.StatusActive && in.Status != model.StatusDisabled && in.Status != model.StatusPending) {
+			response.BadRequest(c, "请选择有效的用户状态")
 			return
 		}
-		err := deps.DB.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Model(&model.User{}).Where("id = ? AND role <> ?", c.Param("id"), model.UserRoleSuperAdmin).
-				Update("status", in.Status).Error; err != nil {
-				return err
-			}
-			if in.Status == model.StatusDisabled {
-				var id uint64
-				id, _ = strconv.ParseUint(c.Param("id"), 10, 64)
-				if err := tx.Where("user_id = ?", id).Delete(&model.AuthSession{}).Error; err != nil {
-					return err
-				}
-				return tx.Model(&model.APIToken{}).Where("user_id = ?", id).Update("status", model.StatusDisabled).Error
-			}
-			return nil
-		})
-		if err != nil {
-			response.ServerError(c, "更新失败")
+		if !applyManagedUserChange(c, deps, "status", in.Status) {
 			return
 		}
 		deps.Audit.Record(nil, "user.status", "user", c.Param("id"), gin.H{"status": in.Status}, clientIP(c))
 		response.OK(c, gin.H{"updated": true})
 	})
+}
+
+var errProtectedUser = errors.New("超级管理员账户受保护，不能在此修改分组、角色或停用")
+
+func applyManagedUserChange(c *gin.Context, deps *Deps, field, value string) bool {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		response.BadRequest(c, "用户编号无效")
+		return false
+	}
+	err = deps.DB.Transaction(func(tx *gorm.DB) error {
+		var user model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, id).Error; err != nil {
+			return err
+		}
+		if user.Role == model.UserRoleSuperAdmin {
+			return errProtectedUser
+		}
+		if err := tx.Model(&user).Update(field, value).Error; err != nil {
+			return err
+		}
+		if field == "status" && value == model.StatusDisabled {
+			if err := tx.Where("user_id = ?", id).Delete(&model.AuthSession{}).Error; err != nil {
+				return err
+			}
+			return tx.Model(&model.APIToken{}).Where("user_id = ?", id).Update("status", model.StatusDisabled).Error
+		}
+		return nil
+	})
+	if errors.Is(err, errProtectedUser) {
+		response.Forbidden(c, err.Error())
+		return false
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		response.NotFound(c, "用户不存在")
+		return false
+	}
+	if err != nil {
+		response.ServerError(c, "更新失败，请重试")
+		return false
+	}
+	return true
 }
 
 // registerStatsRoutes 统计看板（admin+）。

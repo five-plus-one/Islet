@@ -4,6 +4,7 @@
 |------|------|
 | [product-design.md](product-design.md) | 产品目标、信息架构、交互规范与验收计划 |
 | [image-workspace.md](image-workspace.md) | 上传取链、相册封面与客户端连接交互 |
+| [acceptance-image-workspace-2026-10-31.md](acceptance-image-workspace-2026-10-31.md) | 图片工作台交互、布局及上线验收 |
 | [acceptance-2026-10-08.md](acceptance-2026-10-08.md) | 工作台、权限、存储与本地部署验收记录 |
 | [architecture.md](architecture.md) | 系统架构、双端口模型、模块划分 |
 | [data-model.md](data-model.md) | 数据库表结构与关系 |

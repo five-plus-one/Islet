@@ -32,6 +32,7 @@ import {
   Layers,
   Github,
   ArrowUpRight,
+  ShieldCheck,
 } from "lucide-react";
 import {
   api,
@@ -62,18 +63,32 @@ const navigation = [
   ["/tokens", "上传密钥", KeyRound],
   ["/profile", "我的账户", UserRound],
   ["/overview", "运行概览", ChartNoAxesCombined],
+  ["/moderation", "图片审核", ShieldCheck],
   ["/policies", "存储策略", HardDrive],
   ["/groups", "用户分组", Layers],
   ["/users", "用户管理", Users],
   ["/settings", "系统设置", Settings],
 ] as const;
 function RepositoryLink() {
-  return <a className="fp-button fp-ghost" href="https://github.com/five-plus-one/Islet"
-    target="_blank" rel="noopener noreferrer" data-fp-tooltip="在 GitHub 查看源码（新窗口）"
-    aria-label="在 GitHub 查看源码（新窗口）"
-    style={{textDecoration:"none",justifyContent:"flex-start",width:"fit-content"}}>
-    <Github size={18} aria-hidden="true" /><span>GitHub</span><ArrowUpRight size={14} aria-hidden="true" />
-  </a>;
+  return (
+    <a
+      className="fp-button fp-ghost"
+      href="https://github.com/five-plus-one/Islet"
+      target="_blank"
+      rel="noopener noreferrer"
+      data-fp-tooltip="在 GitHub 查看源码（新窗口）"
+      aria-label="在 GitHub 查看源码（新窗口）"
+      style={{
+        textDecoration: "none",
+        justifyContent: "flex-start",
+        width: "fit-content",
+      }}
+    >
+      <Github size={18} aria-hidden="true" />
+      <span>GitHub</span>
+      <ArrowUpRight size={14} aria-hidden="true" />
+    </a>
+  );
 }
 export function App() {
   const installation = useLoad(api.setupStatus);
@@ -224,7 +239,9 @@ function Login({ theme }: { theme: React.ReactNode }) {
           </div>
         )
       )}
-      <p><RepositoryLink /></p>
+      <p>
+        <RepositoryLink />
+      </p>
     </AppEntryLayout>
   );
 }
@@ -445,6 +462,12 @@ function Workspace({ theme }: { theme: React.ReactNode }) {
               <Route path="/albums" element={<Albums />} />
               <Route path="/tokens" element={<Tokens />} />
               <Route path="/profile" element={<Profile />} />
+              <Route
+                path="/moderation"
+                element={
+                  admin ? <Gallery review /> : <Navigate to="/images" replace />
+                }
+              />
               {["overview", "policies", "groups", "users", "settings"].map(
                 (path) => (
                   <Route

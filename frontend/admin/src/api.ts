@@ -6,6 +6,19 @@ export interface ApiResponse<T> {
   data: T;
 }
 
+export interface PicListConfig {
+  uploader: "advancedplist";
+  endpoint: string;
+  method: string;
+  formDataKey: string;
+  headers: string;
+  body: string;
+  resDataPath: string;
+  uploadScriptName: string;
+  customPrefix: string;
+  webPath: string;
+}
+
 export class ApiError extends Error {
   code: number;
   status: number;
@@ -124,6 +137,7 @@ export interface PolicyView {
   bucket?: string;
   prefix?: string;
   cdn?: string;
+  cdn_refresh?: boolean;
   access_key?: string;
   path_style?: boolean;
   secret_configured: boolean;
@@ -142,6 +156,7 @@ export interface PolicyInput {
   bucket: string;
   prefix: string;
   cdn: string;
+  cdn_refresh?: boolean;
   access_key: string;
   secret_key: string;
   path_style: boolean;
@@ -188,6 +203,10 @@ export interface ImageItem {
   width: number;
   height: number;
   tags: string[];
+  blocked: boolean;
+  block_reason: string;
+  moderated_at?: string | null;
+  cache_sync: "pending" | "retrying" | "complete";
   created_at: string;
   deleted_at?: string | null;
 }
@@ -222,6 +241,11 @@ export interface MeInfo {
 // ---- API 函数 ----
 
 export const api = {
+  picListConfig: () => request<PicListConfig>("/api/v1/client-configs/piclist"),
+  imageCacheStatus: (ids: number[]) =>
+    request<Record<string, ImageItem["cache_sync"]>>(
+      "/api/v1/images/cache-sync?ids=" + ids.join(","),
+    ),
   authConfig: () => request<AuthConfig>("/api/v1/auth/config", {}, false),
 
   localLogin: (username: string, password: string) =>
@@ -286,6 +310,11 @@ export const api = {
     request<ImageItem>(`/api/v1/images/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
+    }),
+  moderateImage: (id: number, blocked: boolean, reason: string) =>
+    request<ImageItem>(`/api/admin/images/${id}/moderation`, {
+      method: "PATCH",
+      body: JSON.stringify({ blocked, reason }),
     }),
   recycleImage: (id: number) =>
     request<{ recycled: boolean }>(`/api/v1/images/${id}`, {

@@ -240,7 +240,7 @@ function Settings() {
                     {field(
                       "site.public_base_url",
                       "图片访问地址",
-                      "填写完整网址，例如 https://img.example.com。对象存储的独立访问域名在存储策略中设置。",
+                      "填写本站完整网址，例如 https://img.example.com。图片加速地址在存储策略中设置。",
                       "url",
                     )}
                     {field("brand.name", "品牌名称", "显示在登录页面。")}
@@ -826,6 +826,7 @@ function Policies() {
     bucket: "",
     prefix: "",
     cdn: "",
+    cdn_refresh: false,
     access_key: "",
     secret_key: "",
     path_style: true,
@@ -947,7 +948,7 @@ function Policies() {
                   ["region", "区域"],
                   ["bucket", "存储桶"],
                   ["prefix", "路径前缀"],
-                  ["cdn", "CDN 地址（可选）"],
+                  ["cdn", "图片加速地址"],
                   ["access_key", "访问密钥 ID"],
                   ["secret_key", "访问密钥（留空保留已有）"],
                 ].map(([key, label]) => (
@@ -959,6 +960,14 @@ function Policies() {
                     onChange={(v) => update(key, v)}
                   />
                 ))}
+                <Checkbox
+                  label="启用阿里云 CDN 缓存同步"
+                  checked={!!edit.cdn_refresh}
+                  onChange={(e) => update("cdn_refresh", e.target.checked)}
+                />
+                <p className="fp-muted">
+                  加速域名须回源至本站；访问密钥需具备该域名的刷新与查询权限。限制、恢复和回收图片时自动同步访问状态。
+                </p>
                 <Checkbox
                   label="使用路径风格访问"
                   checked={edit.path_style}
@@ -976,15 +985,10 @@ function Policies() {
                 { value: "keep", label: "保留文件名" },
               ]}
             />
-            <Choice
-              label="访问方式"
-              value={edit.url_mode}
-              onChange={(v) => update("url_mode", v)}
-              options={[
-                { value: "proxy", label: "通过本站访问" },
-                { value: "direct", label: "直连存储 / CDN" },
-              ]}
-            />
+            <p className="fp-muted">
+              启用加速与缓存同步后，分享链接默认使用
+              CDN。对象存储应设置为私有读取，保留本站的审核与恢复能力。
+            </p>
             <Choice
               label="状态"
               value={edit.status}

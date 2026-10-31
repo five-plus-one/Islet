@@ -19,8 +19,10 @@ import {
   RotateCcw,
   Plus,
   Image as ImageIcon,
+  ShieldBan,
+  ShieldCheck,
 } from "lucide-react";
-import { api, type ImageItem, type AlbumView } from "../api";
+import { api, getAccessToken, type ImageItem, type AlbumView } from "../api";
 import {
   humanBytes,
   dateLabel,
@@ -43,7 +45,23 @@ import {
   changed,
 } from "./common";
 import { uploads, useUploads } from "./uploads";
-export function Gallery({ recycled = false }: { recycled?: boolean }) {
+import { PicListConfig } from "./PicListConfig";
+function imagePreviewURL(url: string, item: ImageItem) {
+  if (!item.moderated_at) return url;
+  return (
+    url +
+    (url.includes("?") ? "&" : "?") +
+    "review=" +
+    encodeURIComponent(item.moderated_at + "-" + item.cache_sync)
+  );
+}
+export function Gallery({
+  recycled = false,
+  review = false,
+}: {
+  recycled?: boolean;
+  review?: boolean;
+}) {
   const { me, notify } = useSession(),
     navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -56,14 +74,24 @@ export function Gallery({ recycled = false }: { recycled?: boolean }) {
     [confirm, setConfirm] = useState<"delete" | "purge" | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [moderation, setModeration] = useState<{
+    items: ImageItem[];
+    blocked: boolean;
+  }>();
   const albums = useLoad(api.albums);
+  const users = useLoad(
+    () => (review ? api.users() : Promise.resolve({ items: [] })),
+    [review],
+  );
   const seq = useRef(0);
   const [items, setItems] = useState<ImageItem[]>([]),
     [more, setMore] = useState(false),
     [loading, setLoading] = useState(true);
-  const scope = params.get("scope") || "mine",
+  const scope = review ? "all" : params.get("scope") || "mine",
     album = params.get("album") || "",
-    mime = params.get("mime") || "";
+    mime = params.get("mime") || "",
+    status = params.get("status") || "",
+    owner = params.get("owner") || "";
   async function load(append = false) {
     const id = ++seq.current;
     setLoading(true);
@@ -75,6 +103,8 @@ export function Gallery({ recycled = false }: { recycled?: boolean }) {
       if (album) p.set("album_id", album);
       if (mime) p.set("mime", mime);
       if (scope === "all") p.set("scope", "all");
+      if (status) p.set("moderation", status);
+      if (review && owner) p.set("user_id", owner);
       const last = items.at(-1);
       if (append && last) {
         p.set("before", last.created_at);
@@ -91,6 +121,9 @@ export function Gallery({ recycled = false }: { recycled?: boolean }) {
           : res.items,
       );
       setMore(res.has_more);
+      setDetail((prev) =>
+        prev ? res.items.find((x) => x.id === prev.id) || prev : prev,
+      );
       if (!append) setSelected([]);
     } catch (e) {
       if (id === seq.current) setError(errorText(e));
@@ -104,7 +137,49 @@ export function Gallery({ recycled = false }: { recycled?: boolean }) {
     return () => {
       seq.current++;
     };
-  }, [params.toString(), recycled]);
+  }, [params.toString(), recycled, review]);
+  useEffect(() => {
+    if (
+      !items.some(
+        (x) => x.cache_sync === "pending" || x.cache_sync === "retrying",
+      )
+    )
+      return;
+    let alive = true,
+      checking = false;
+    const ids = items
+      .filter((x) => x.cache_sync !== "complete")
+      .slice(0, 100)
+      .map((x) => x.id);
+    const timer = window.setInterval(async () => {
+      if (document.hidden || busy || checking) return;
+      checking = true;
+      try {
+        const states = await api.imageCacheStatus(ids);
+        if (!alive) return;
+        setItems((prev) =>
+          prev.some((x) => states[x.id] && states[x.id] !== x.cache_sync)
+            ? prev.map((x) =>
+                states[x.id] ? { ...x, cache_sync: states[x.id] } : x,
+              )
+            : prev,
+        );
+        setDetail((prev) =>
+          prev && states[prev.id]
+            ? { ...prev, cache_sync: states[prev.id] }
+            : prev,
+        );
+      } catch (e) {
+        if (alive) setError(errorText(e));
+      } finally {
+        checking = false;
+      }
+    }, 10000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [items, params.toString(), busy]);
   function filter(key: string, v: string) {
     const p = new URLSearchParams(params);
     v ? p.set(key, v) : p.delete(key);
@@ -155,17 +230,21 @@ export function Gallery({ recycled = false }: { recycled?: boolean }) {
   return (
     <>
       <Heading
-        title={recycled ? "回收站" : "图片库"}
+        title={review ? "图片审核" : recycled ? "回收站" : "图片库"}
         description={
-          recycled
-            ? "找回最近移入回收站的图片，或永久删除不再需要的内容。"
-            : "把值得收藏的画面整理在一起，随时分享。"
+          review
+            ? "查看全站上传内容，管理图片的公开访问。"
+            : recycled
+              ? "找回最近移入回收站的图片，或永久删除不再需要的内容。"
+              : "把值得收藏的画面整理在一起，随时分享。"
         }
         actions={
-          <Button onClick={() => navigate("/upload")}>
-            <Upload size={18} />
-            上传图片
-          </Button>
+          !review ? (
+            <Button onClick={() => navigate("/upload")}>
+              <Upload size={18} />
+              上传图片
+            </Button>
+          ) : undefined
         }
       />
       <Card>
@@ -180,18 +259,20 @@ export function Gallery({ recycled = false }: { recycled?: boolean }) {
           <Button type="submit" variant="secondary">
             搜索
           </Button>
-          <Choice
-            label="相册"
-            value={album}
-            onChange={(v) => filter("album", v)}
-            options={[
-              { value: "", label: "全部相册" },
-              ...(albums.data?.items || []).map((x) => ({
-                value: String(x.id),
-                label: x.name,
-              })),
-            ]}
-          />
+          {!review && (
+            <Choice
+              label="相册"
+              value={album}
+              onChange={(v) => filter("album", v)}
+              options={[
+                { value: "", label: "全部相册" },
+                ...(albums.data?.items || []).map((x) => ({
+                  value: String(x.id),
+                  label: x.name,
+                })),
+              ]}
+            />
+          )}
           <Choice
             label="格式"
             value={mime}
@@ -204,7 +285,7 @@ export function Gallery({ recycled = false }: { recycled?: boolean }) {
               })),
             ]}
           />
-          {me.user.role !== "user" && (
+          {me.user.role !== "user" && !review && (
             <Choice
               label="查看范围"
               value={scope}
@@ -215,14 +296,50 @@ export function Gallery({ recycled = false }: { recycled?: boolean }) {
               ]}
             />
           )}
+          {review && (
+            <Choice
+              label="上传者"
+              value={owner}
+              onChange={(v) => filter("owner", v)}
+              options={[
+                { value: "", label: "全部上传者" },
+                ...(users.data?.items || []).map((x) => ({
+                  value: String(x.id),
+                  label: x.username,
+                })),
+              ]}
+            />
+          )}
           <Choice
-            label="复制格式"
-            value={format}
-            onChange={(v) => setFormat(v as LinkFormat)}
-            options={linkFormats}
+            label="访问状态"
+            value={status}
+            onChange={(v) => filter("status", v)}
+            options={[
+              { value: "", label: "全部状态" },
+              { value: "active", label: "正常访问" },
+              { value: "blocked", label: "已禁止访问" },
+            ]}
           />
+          {!review && (
+            <Choice
+              label="复制格式"
+              value={format}
+              onChange={(v) => setFormat(v as LinkFormat)}
+              options={linkFormats}
+            />
+          )}
         </form>
         <Failure error={error} retry={() => void load()} />
+        {items.some(
+          (x) => x.cache_sync === "pending" || x.cache_sync === "retrying",
+        ) && (
+          <p role="status" className="fp-muted">
+            {items.some((x) => x.cache_sync === "retrying")
+              ? "部分图片的访问状态正在自动重试同步。"
+              : "正在同步图片访问状态，完成后自动更新。"}
+          </p>
+        )}
+        {review && <Failure error={users.error} retry={users.reload} />}
         <div className="islet-library-actions">
           <span>
             {selected.length
@@ -239,28 +356,59 @@ export function Gallery({ recycled = false }: { recycled?: boolean }) {
                 onSelect: () => void load(),
                 disabled: busy,
               },
-              {
-                id: "copy",
-                label: "复制所选链接",
-                icon: <Copy size={18} />,
-                onSelect: () => void copy(chosen),
-                disabled: !chosen.length,
-              },
-              {
-                id: "move",
-                label: "移动到相册",
-                icon: <FolderInput size={18} />,
-                onSelect: () => setMove(true),
-                disabled: !chosen.length || !canMove || busy || recycled,
-              },
-              {
-                id: "delete",
-                label: recycled ? "永久删除" : "移入回收站",
-                icon: <Trash2 size={18} />,
-                onSelect: () => setConfirm(recycled ? "purge" : "delete"),
-                danger: true,
-                disabled: !chosen.length || !allowed || busy,
-              },
+              ...(me.user.role !== "user" && !recycled
+                ? [
+                    {
+                      id: "block",
+                      label: "禁止访问",
+                      icon: <ShieldBan size={18} />,
+                      danger: true,
+                      onSelect: () =>
+                        setModeration({
+                          items: chosen.filter((x) => !x.blocked),
+                          blocked: true,
+                        }),
+                      disabled: !chosen.some((x) => !x.blocked) || busy,
+                    },
+                    {
+                      id: "allow",
+                      label: "恢复访问",
+                      icon: <ShieldCheck size={18} />,
+                      onSelect: () =>
+                        setModeration({
+                          items: chosen.filter((x) => x.blocked),
+                          blocked: false,
+                        }),
+                      disabled: !chosen.some((x) => x.blocked) || busy,
+                    },
+                  ]
+                : []),
+              ...(!review
+                ? [
+                    {
+                      id: "copy",
+                      label: "复制所选链接",
+                      icon: <Copy size={18} />,
+                      onSelect: () => void copy(chosen),
+                      disabled: !chosen.length,
+                    },
+                    {
+                      id: "move",
+                      label: "移动到相册",
+                      icon: <FolderInput size={18} />,
+                      onSelect: () => setMove(true),
+                      disabled: !chosen.length || !canMove || busy || recycled,
+                    },
+                    {
+                      id: "delete",
+                      label: recycled ? "永久删除" : "移入回收站",
+                      icon: <Trash2 size={18} />,
+                      onSelect: () => setConfirm(recycled ? "purge" : "delete"),
+                      danger: true,
+                      disabled: !chosen.length || !allowed || busy,
+                    },
+                  ]
+                : []),
               ...(recycled
                 ? [
                     {
@@ -286,7 +434,7 @@ export function Gallery({ recycled = false }: { recycled?: boolean }) {
               name: x.original_name,
               size: x.size,
               modifiedAt: x.created_at,
-              thumbnailUrl: x.thumb_url || x.url,
+              thumbnailUrl: imagePreviewURL(x.thumb_url || x.url, x),
             }))}
             query=""
             onQueryChange={() => {}}
@@ -314,13 +462,33 @@ export function Gallery({ recycled = false }: { recycled?: boolean }) {
         <ImageDetails
           item={detail}
           editable={
-            me.user.role === "super_admin" || detail.user_id === me.user.id
+            !review &&
+            (me.user.role === "super_admin" || detail.user_id === me.user.id)
           }
           albums={albums.data?.items || []}
           format={format}
           recycled={recycled}
           onClose={() => setDetail(undefined)}
           onSaved={() => {
+            void load();
+            changed();
+          }}
+          onModerate={
+            me.user.role !== "user" && !recycled
+              ? (blocked) => {
+                  setModeration({ items: [detail], blocked });
+                  setDetail(undefined);
+                }
+              : undefined
+          }
+        />
+      )}
+      {moderation && (
+        <ModerationDialog
+          items={moderation.items}
+          blocked={moderation.blocked}
+          onClose={() => setModeration(undefined)}
+          onChanged={() => {
             void load();
             changed();
           }}
@@ -386,6 +554,7 @@ function ImageDetails({
   recycled,
   onClose,
   onSaved,
+  onModerate,
 }: {
   item: ImageItem;
   editable: boolean;
@@ -394,6 +563,7 @@ function ImageDetails({
   recycled: boolean;
   onClose: () => void;
   onSaved: () => void;
+  onModerate?: (blocked: boolean) => void;
 }) {
   const [name, setName] = useState(item.original_name),
     [album, setAlbum] = useState(String(item.album_id || "")),
@@ -409,6 +579,20 @@ function ImageDetails({
       onClose={() => !busy && onClose()}
       footer={
         <>
+          {onModerate && (
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() => onModerate(!item.blocked)}
+            >
+              {item.blocked ? (
+                <ShieldCheck size={17} />
+              ) : (
+                <ShieldBan size={17} />
+              )}
+              {item.blocked ? "恢复访问" : "禁止访问"}
+            </Button>
+          )}
           <Button
             variant="secondary"
             onClick={async () => {
@@ -456,7 +640,32 @@ function ImageDetails({
         </>
       }
     >
-      <img className="islet-preview" src={item.url} alt={item.original_name} />
+      <img
+        className="islet-preview"
+        src={imagePreviewURL(item.url, item)}
+        alt={item.original_name}
+      />
+      <p>
+        <strong>{item.blocked ? "已禁止访问" : "正常访问"}</strong>
+        {item.username && <> · 上传者：{item.username}</>}
+      </p>
+      {item.blocked && <p>违规原因：{item.block_reason}</p>}
+      {item.cache_sync !== "complete" && (
+        <p role="status">
+          {item.cache_sync === "retrying"
+            ? "访问状态同步暂未完成，正在自动重试。"
+            : "正在同步访问状态，部分地区可能仍显示之前的图片。"}
+        </p>
+      )}
+      {item.cache_sync === "complete" && item.moderated_at && (
+        <p className="fp-muted">访问状态已同步</p>
+      )}
+      {item.moderated_at && (
+        <p className="fp-muted">最近审核：{dateLabel(item.moderated_at)}</p>
+      )}
+      {onModerate && item.blocked && (
+        <OriginalPreview id={item.id} name={item.original_name} />
+      )}
       <p className="fp-muted">
         {humanBytes(item.size)} · {item.width} × {item.height} ·{" "}
         {dateLabel(item.created_at)}
@@ -489,6 +698,155 @@ function ImageDetails({
     </Dialog>
   );
 }
+function OriginalPreview({ id, name }: { id: number; name: string }) {
+  const [open, setOpen] = useState(false),
+    [url, setURL] = useState(""),
+    [error, setError] = useState("");
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    let objectURL = "";
+    setError("");
+    setURL("");
+    const token = getAccessToken();
+    void fetch(`/api/admin/images/${id}/preview`, {
+      signal: controller.signal,
+      cache: "no-store",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("无法查看原图，请检查登录状态后重试");
+        const blob = await response.blob();
+        if (controller.signal.aborted) return;
+        objectURL = URL.createObjectURL(blob);
+        setURL(objectURL);
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) setError(errorText(e));
+      });
+    return () => {
+      controller.abort();
+      if (objectURL) URL.revokeObjectURL(objectURL);
+    };
+  }, [id, open, revision]);
+  return (
+    <>
+      <Button variant="secondary" onClick={() => setOpen((v) => !v)}>
+        {open ? "收起原图" : "查看原图"}
+      </Button>
+      {open && (
+        <>
+          <p className="fp-muted">原图仅供管理员复核，公开访问仍受限制。</p>
+          <Failure error={error} retry={() => setRevision((v) => v + 1)} />
+          {!url && !error && <Loading />}
+          {url && (
+            <img className="islet-preview" src={url} alt={`${name} 原图`} />
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+function ModerationDialog({
+  items,
+  blocked,
+  onClose,
+  onChanged,
+}: {
+  items: ImageItem[];
+  blocked: boolean;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const { notify } = useSession();
+  const [pending, setPending] = useState(items),
+    [reason, setReason] = useState(""),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const title = blocked ? "禁止访问" : "恢复访问";
+  const submit = async () => {
+    if (busy) return;
+    if (blocked && (!reason.trim() || [...reason.trim()].length > 500)) {
+      setError("请填写违规原因，最多 500 字");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    const failed: ImageItem[] = [],
+      errors: string[] = [];
+    let syncing = false;
+    for (const item of pending) {
+      try {
+        const result = await api.moderateImage(item.id, blocked, reason.trim());
+        if (result.cache_sync !== "complete") syncing = true;
+      } catch (e) {
+        failed.push(item);
+        errors.push(`${item.original_name}：${errorText(e)}`);
+      }
+    }
+    const count = pending.length - failed.length;
+    setPending(failed);
+    setBusy(false);
+    if (count) {
+      notify(
+        syncing
+          ? `已保存 ${count} 张图片的审核结果，正在同步访问状态`
+          : `已${title} ${count} 张图片`,
+      );
+      onChanged();
+    }
+    if (failed.length) setError(errors.join("；"));
+    else onClose();
+  };
+  return (
+    <Dialog
+      open
+      title={`${title} · ${pending.length} 张图片`}
+      onClose={() => !busy && onClose()}
+      footer={
+        <>
+          <Button variant="secondary" disabled={busy} onClick={onClose}>
+            取消
+          </Button>
+          <Button loading={busy} onClick={() => void submit()}>
+            确认{title}
+          </Button>
+        </>
+      }
+    >
+      <div className="islet-form">
+        <p>
+          {blocked
+            ? "公开链接将显示违反使用策略的提示图片，原文件保留，可在复核后恢复访问。"
+            : "所选图片的公开链接将重新显示原图。"}
+        </p>
+        <p className="fp-muted">
+          使用 CDN 的图片会自动同步至各地区，通常需要 5–6 分钟。
+        </p>
+        <p>
+          {pending
+            .slice(0, 3)
+            .map((x) => x.original_name)
+            .join("、")}
+          {pending.length > 3 ? ` 等 ${pending.length} 张图片` : ""}
+        </p>
+        {blocked && (
+          <TextField
+            label="违规原因"
+            required
+            value={reason}
+            onChange={setReason}
+            hint="向上传者说明限制原因，最多 500 字"
+          />
+        )}
+        <Failure error={error} />
+      </div>
+    </Dialog>
+  );
+}
+
 export function UploadPage() {
   const { me, notify } = useSession(),
     navigate = useNavigate(),
@@ -774,6 +1132,7 @@ export function Tokens() {
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [remove, setRemove] = useState<number>();
+  const [picList, setPicList] = useState<{ key: string }>();
   return (
     <>
       <Heading
@@ -813,7 +1172,12 @@ export function Tokens() {
       </div>
       {data.loading && <Loading />}
       <Card>
-        <h2>连接 PicGo / PicList</h2>
+        <h2>连接 PicList</h2>
+        <p>使用高级自定义图床上传，可选择存储策略与相册。</p>
+        <Button variant="secondary" onClick={() => setPicList({ key: "" })}>
+          配置 PicList
+        </Button>
+        <h3>连接 PicGo</h3>
         <p>
           选择自定义上传，使用 POST 与 multipart/form-data，文件字段填写 files。
         </p>
@@ -878,24 +1242,41 @@ export function Tokens() {
         title="保存你的上传密钥"
         onClose={() => setSecret("")}
         footer={
-          <Button
-            onClick={async () => {
-              try {
-                await copyText(secret);
-                notify("密钥已复制");
-              } catch (e) {
-                setError(errorText(e));
-              }
-            }}
-          >
-            复制密钥
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setPicList({ key: secret });
+                setSecret("");
+              }}
+            >
+              配置 PicList
+            </Button>
+            <Button
+              onClick={async () => {
+                try {
+                  await copyText(secret);
+                  notify("密钥已复制");
+                } catch (e) {
+                  setError(errorText(e));
+                }
+              }}
+            >
+              复制密钥
+            </Button>
+          </>
         }
       >
         <p>密钥只展示这一次，请妥善保存。任何持有者都可以使用你的上传权限。</p>
         <pre className="islet-secret">{secret}</pre>
         <Failure error={error} />
       </Dialog>
+      {picList && (
+        <PicListConfig
+          initialKey={picList.key}
+          onClose={() => setPicList(undefined)}
+        />
+      )}
       {remove !== undefined && (
         <Confirm
           title="撤销密钥"

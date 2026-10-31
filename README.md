@@ -6,9 +6,11 @@ Islet 是一个自托管多用户图床，基于 Go + React 19 构建。标准 O
 
 - **认证**：标准 OIDC（Authorization Code + PKCE S256，后端代理 token 交换，兼容 Logto / Authentik / Keycloak 等任何规范 IdP）或本地 bcrypt 管理员账号；RBAC（super_admin / admin / user）。OIDC 登录按钮的名称与图标可在后台自定义。
 - **用户分组**：分组决定「能用多少、能传什么、存到哪里」——总配额、单文件上限、格式白名单、可用存储策略、每小时上传频率。内置管理员组与默认组。
-- **多存储策略**：本地磁盘 / S3 兼容（阿里云 OSS 自动 endpoint 归一化与地域校验、MinIO、R2、COS 等），直链 / 302 或应用代理两种访问模式；密钥 AES-256-GCM 加密入库；一键连通性测试。
-- **上传**：Web 拖拽 / 粘贴 / 批量，PicGo 兼容 API；sha256 内容去重、自动宽高解析、480px 缩略图、三种命名规则（保留原名 / 随机 / 日期目录）。
+- **多存储策略**：本地磁盘 / S3 兼容（阿里云 OSS 自动 endpoint 归一化与地域校验、MinIO、R2、COS 等）；图片统一经应用读取并校验访问状态；密钥 AES-256-GCM 加密入库；一键连通性测试。
+- **上传**：Web 拖拽 / 粘贴 / 批量、PicGo 兼容 API 与 [PicList 配置](Docs/piclist.md)；sha256 内容去重、自动宽高解析、480px 缩略图、三种命名规则（保留原名 / 随机 / 日期目录）。
 - **图片管理**：图库筛选（相册 / 标签 / 类型 / 关键词）、直链 / Markdown / HTML / BBCode 复制、相册、标签、回收站（软删除 + 保留期自动清理）。
+- **图片审核**：管理员按上传者和访问状态查看全站图片，填写违规原因后限制公开访问；公开链接显示策略提示图，保留原文件，支持原图复核、批量审核和恢复访问。
+- **CDN 分发**：默认使用配置的加速域名；审核、回收和恢复自动生成持久刷新任务，失败重试，显示全网同步状态。
 - **看板**：总量 / 用量 / 趋势 / 分组分布统计，审计日志。
 - **初始化向导**：首次启动在管理端完成 MySQL / Redis / 管理员身份 / 站点设置，无需手改配置文件；业务进程内热启用。
 
@@ -55,6 +57,7 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.server.yml up -d
 - [数据库模型](Docs/data-model.md)
 - [API 设计](Docs/api-overview.md)
 - [存储策略](Docs/storage.md)
+- [图片审核](Docs/image-moderation.md)
 - [初始化向导](Docs/setup.md)
 - [服务器部署](deploy/DEPLOY.md)
 

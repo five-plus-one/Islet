@@ -254,10 +254,20 @@ test.describe.serial("Account and storage API acceptance", () => {
       group_id: group.ID,
     });
     memberID = user.id;
-    await call(owner, `/api/admin/users/${memberID}/group`, "PATCH", {group_id:group.ID});
-    await call(owner, `/api/admin/users/${memberID}/role`, "PATCH", {role:"admin"});
-    expect((await call(owner,"/api/admin/users")).items.find((x:any) => x.id === memberID).role).toBe("admin");
-    await call(owner, `/api/admin/users/${memberID}/role`, "PATCH", {role:"user"});
+    await call(owner, `/api/admin/users/${memberID}/group`, "PATCH", {
+      group_id: group.ID,
+    });
+    await call(owner, `/api/admin/users/${memberID}/role`, "PATCH", {
+      role: "admin",
+    });
+    expect(
+      (await call(owner, "/api/admin/users")).items.find(
+        (x: any) => x.id === memberID,
+      ).role,
+    ).toBe("admin");
+    await call(owner, `/api/admin/users/${memberID}/role`, "PATCH", {
+      role: "user",
+    });
 
     await call(owner, "/api/admin/users", "POST", {
       username: "outsider-" + suffix,
@@ -403,6 +413,35 @@ test.describe.serial("Account and storage API acceptance", () => {
       extraHTTPHeaders: { Authorization: `Bearer ${key.token}` },
     });
     expect((await tokenAdmin.get("/api/v1/me/tokens")).status()).toBe(403);
+    const piclist = await call(member, "/api/v1/client-configs/piclist");
+    expect(piclist.uploader).toBe("advancedplist");
+    expect(piclist.endpoint).toBe(publicURL + "/api/v1/upload");
+    expect(piclist.formDataKey).toBe("files");
+    expect(JSON.stringify(piclist)).not.toContain(key.token);
+    expect(
+      (await tokenAdmin.get("/api/v1/client-configs/piclist")).status(),
+    ).toBe(403);
+    const anonymous = await request.newContext({ baseURL });
+    expect(
+      (await anonymous.get("/api/v1/client-configs/piclist")).status(),
+    ).toBe(401);
+    await anonymous.dispose();
+    const piclistUpload = await client.post(piclist.endpoint, {
+      multipart: {
+        [piclist.formDataKey]: {
+          name: "piclist.png",
+          mimeType: "image/png",
+          buffer: png(10),
+        },
+      },
+    });
+    const piclistResult = await piclistUpload.json();
+    const piclistURL = piclist.resDataPath
+      .split(".")
+      .reduce((value: any, part: string) => value[part], piclistResult);
+    expect(typeof piclistURL).toBe("string");
+    expect(piclistURL).toContain(publicURL + "/i/");
+    expect((await client.get(piclistURL)).status()).toBe(200);
     expect(
       (
         await member.post("/api/v1/upload", {
@@ -459,18 +498,28 @@ test.describe.serial("Account and storage API acceptance", () => {
       policy_ids: [1],
       status: "active",
     });
-    const disabledKey = await call(member,"/api/v1/me/tokens","POST",{name:"disabled-"+suffix});
+    const disabledKey = await call(member, "/api/v1/me/tokens", "POST", {
+      name: "disabled-" + suffix,
+    });
     await call(owner, `/api/admin/users/${memberID}/status`, "PATCH", {
       status: "disabled",
     });
-    expect((await call(owner,"/api/admin/users")).items.find((x:any) => x.id === memberID).status).toBe("disabled");
+    expect(
+      (await call(owner, "/api/admin/users")).items.find(
+        (x: any) => x.id === memberID,
+      ).status,
+    ).toBe("disabled");
     expect((await member.get("/api/v1/me")).status()).toBe(401);
     await call(owner, `/api/admin/users/${memberID}/status`, "PATCH", {
       status: "active",
     });
     expect((await member.get("/api/v1/me")).status()).toBe(401);
     await login(member, "member-" + suffix);
-    expect((await call(member,"/api/v1/me/tokens")).items.find((x:any) => x.id === disabledKey.item.id).status).toBe("disabled");
+    expect(
+      (await call(member, "/api/v1/me/tokens")).items.find(
+        (x: any) => x.id === disabledKey.item.id,
+      ).status,
+    ).toBe("disabled");
     const next = credentials.password + "x";
     await call(member, "/api/v1/me/password", "POST", {
       current_password: credentials.password,
@@ -482,7 +531,7 @@ test.describe.serial("Account and storage API acceptance", () => {
       password: next,
     });
   });
-  test("S3 proxy, policy restrictions and recoverable deletion", async () => {
+  test("S3 managed access, policy restrictions and recoverable deletion", async () => {
     const config = {
       name: "对象存储-" + suffix,
       driver: "s3",
@@ -510,6 +559,42 @@ test.describe.serial("Account and storage API acceptance", () => {
     expect(image.url).toContain(publicURL + "/i/");
     expect((await owner.get(image.url)).status()).toBe(200);
     expect((await owner.get(image.thumb_url)).status()).toBe(200);
+    await call(owner, `/api/admin/storage-policies/${policy.id}`, "PATCH", {
+      ...config,
+      url_mode: "direct",
+      cdn: publicURL + "/source-only",
+    });
+    const direct = await upload(owner, 64, { policy_id: String(policy.id) });
+    expect(direct.url).toContain(publicURL + "/i/");
+    expect((await owner.get(direct.url)).headers()["content-type"]).toContain(
+      "image/png",
+    );
+    await call(owner, `/api/admin/images/${direct.id}/moderation`, "PATCH", {
+      blocked: true,
+      reason: "对象存储审核验证",
+    });
+    expect((await owner.get(direct.url)).headers()["content-type"]).toContain(
+      "image/svg+xml",
+    );
+    expect(
+      (await owner.get(`/api/admin/images/${direct.id}/preview`)).headers()[
+        "content-type"
+      ],
+    ).toContain("image/png");
+    await call(owner, `/api/admin/images/${direct.id}/moderation`, "PATCH", {
+      blocked: false,
+    });
+    expect((await owner.get(direct.url)).headers()["content-type"]).toContain(
+      "image/png",
+    );
+    await call(owner, `/api/v1/images/${direct.id}`, "DELETE");
+    await call(owner, `/api/v1/images/${direct.id}/purge`, "DELETE");
+    await call(
+      owner,
+      `/api/admin/storage-policies/${policy.id}`,
+      "PATCH",
+      config,
+    );
     expect(
       (
         await outsider.post("/api/v1/upload", {
@@ -558,6 +643,198 @@ test.describe.serial("Account and storage API acceptance", () => {
     await call(owner, `/api/v1/images/${image.id}/purge`, "DELETE");
     expect((await owner.get(image.url)).status()).toBe(404);
     await call(owner, `/api/admin/storage-policies/${policy.id}`, "DELETE");
+  });
+  test("image moderation protects public links and preserves originals", async () => {
+    const anon = await request.newContext({ baseURL }),
+      reviewer = await request.newContext({ baseURL }),
+      uploader = await request.newContext({ baseURL });
+    try {
+      const u = await call(owner, "/api/admin/users", "POST", {
+        username: "review-uploader-" + suffix,
+        password: credentials.password,
+        group_id: group.ID,
+      });
+      const a = await call(owner, "/api/admin/users", "POST", {
+        username: "reviewer-" + suffix,
+        password: credentials.password,
+        group_id: group.ID,
+      });
+      await call(owner, `/api/admin/users/${a.id}/role`, "PATCH", {
+        role: "admin",
+      });
+      await login(reviewer, "reviewer-" + suffix);
+      await login(uploader, "review-uploader-" + suffix);
+      const image = await upload(uploader, 79),
+        original = await (await anon.get(image.url)).body();
+      const privateStates = await call(
+        uploader,
+        `/api/v1/images/cache-sync?ids=${image.id},${ownerImage.id}`,
+      );
+      expect(privateStates[image.id]).toBe("complete");
+      expect(privateStates[ownerImage.id]).toBeUndefined();
+      expect(
+        (await anon.get(`/api/v1/images/cache-sync?ids=${image.id}`)).status(),
+      ).toBe(401);
+      const key = new URL(image.url).pathname.slice(3),
+        legacyURL = publicURL + "/legacy/" + key;
+      expect(await (await anon.get(legacyURL)).body()).toEqual(original);
+      expect(
+        (await call(reviewer, `/api/v1/images?scope=all&user_id=${u.id}`))
+          .items[0].id,
+      ).toBe(image.id);
+      expect(
+        (await call(uploader, "/api/v1/images?scope=all")).items.every(
+          (x: any) => x.user_id === u.id,
+        ),
+      ).toBe(true);
+      const path = `/api/admin/images/${image.id}/moderation`,
+        preview = `/api/admin/images/${image.id}/preview`;
+      expect((await anon.get(preview)).status()).toBe(401);
+      expect((await uploader.get(preview)).status()).toBe(403);
+      expect(
+        (
+          await uploader.patch(path, {
+            data: { blocked: true, reason: "越权" },
+          })
+        ).status(),
+      ).toBe(403);
+      for (const data of [
+        {},
+        { blocked: null },
+        { blocked: "true" },
+        { blocked: true, reason: " " },
+        { blocked: true, reason: "字".repeat(501) },
+      ]) {
+        expect((await reviewer.patch(path, { data })).status()).toBe(400);
+      }
+      expect(
+        (
+          await reviewer.patch("/api/admin/images/not-a-number/moderation", {
+            data: { blocked: true, reason: "测试" },
+          })
+        ).status(),
+      ).toBe(400);
+      expect(
+        (
+          await reviewer.patch("/api/admin/images/999999999/moderation", {
+            data: { blocked: true, reason: "测试" },
+          })
+        ).status(),
+      ).toBe(404);
+      const before = await anon.get(image.url),
+        etag = before.headers().etag;
+      const blocked = await call(reviewer, path, "PATCH", {
+        blocked: true,
+        reason: "测试图片违反使用策略",
+      });
+      expect(blocked.blocked).toBe(true);
+      expect(blocked.block_reason).toBe("测试图片违反使用策略");
+      expect(blocked.moderated_at).toBeTruthy();
+      for (const url of [
+        image.url,
+        image.thumb_url,
+        legacyURL,
+        legacyURL + ".thumb.png",
+      ]) {
+        const response = await anon.get(url, {
+          headers: { "If-None-Match": etag },
+        });
+        expect(response.status()).toBe(200);
+        expect(response.headers()["content-type"]).toContain("image/svg+xml");
+        expect(response.headers()["cache-control"]).toContain("no-store");
+        expect(await response.text()).toContain("图片违反使用策略");
+        expect(await response.text()).not.toContain("测试图片");
+        const head = await anon.head(url);
+        expect(head.status()).toBe(200);
+        expect(await head.body()).toHaveLength(0);
+      }
+      const protectedPreview = await reviewer.get(preview);
+      expect(protectedPreview.headers()["cache-control"]).toBe(
+        "private, no-store",
+      );
+      expect(await protectedPreview.body()).toEqual(original);
+      expect(
+        (await reviewer.get(preview + "?thumb=1")).headers()["content-type"],
+      ).toContain("image/png");
+      expect(
+        (await call(uploader, "/api/v1/images?moderation=blocked")).items[0]
+          .block_reason,
+      ).toBe("测试图片违反使用策略");
+      expect(
+        (
+          await call(
+            reviewer,
+            `/api/v1/images?scope=all&user_id=${u.id}&moderation=active`,
+          )
+        ).items,
+      ).toHaveLength(0);
+      expect((await upload(uploader, 79)).blocked).toBe(true);
+      await call(uploader, `/api/v1/images/${image.id}`, "PATCH", {
+        blocked: false,
+        block_reason: "",
+        name: "复核画面.png",
+      });
+      expect((await call(uploader, "/api/v1/images")).items[0].blocked).toBe(
+        true,
+      );
+      await call(uploader, `/api/v1/images/${image.id}`, "DELETE");
+      expect((await anon.get(image.url)).status()).toBe(404);
+      expect((await reviewer.get(preview)).status()).toBe(404);
+      await call(uploader, `/api/v1/images/${image.id}/restore`, "POST");
+      expect((await anon.get(image.url)).headers()["content-type"]).toContain(
+        "image/svg+xml",
+      );
+      const restored = await call(reviewer, path, "PATCH", { blocked: false });
+      expect(restored.blocked).toBe(false);
+      expect(restored.block_reason).toBe("");
+      expect(await (await anon.get(image.url)).body()).toEqual(original);
+      expect(await (await anon.get(legacyURL)).body()).toEqual(original);
+      expect(
+        (await anon.get(image.thumb_url)).headers()["content-type"],
+      ).toContain("image/png");
+      expect((await anon.head(image.url)).headers()["cache-control"]).toBe(
+        "no-store",
+      );
+      const audit = (
+        await call(owner, "/api/admin/audit-logs?limit=100")
+      ).items.filter(
+        (x: any) =>
+          x.target_type === "image" &&
+          x.target_id === String(image.id) &&
+          ["image.block", "image.allow"].includes(x.action),
+      );
+      expect(audit.map((x: any) => x.action).sort()).toEqual([
+        "image.allow",
+        "image.block",
+      ]);
+      expect(
+        JSON.parse(audit.find((x: any) => x.action === "image.block").detail)
+          .reason,
+      ).toBe("测试图片违反使用策略");
+      const token = await call(owner, "/api/v1/me/tokens", "POST", {
+        name: "moderation-isolation-" + suffix,
+      });
+      expect(
+        (
+          await anon.get(preview, {
+            headers: { Authorization: `Bearer ${token.token}` },
+          })
+        ).status(),
+      ).toBe(403);
+      expect(
+        (
+          await anon.patch(path, {
+            headers: { Authorization: `Bearer ${token.token}` },
+            data: { blocked: true, reason: "Token 禁止审核" },
+          })
+        ).status(),
+      ).toBe(403);
+      await call(owner, `/api/v1/me/tokens/${token.item.id}`, "DELETE");
+    } finally {
+      await anon.dispose();
+      await reviewer.dispose();
+      await uploader.dispose();
+    }
   });
   test.afterAll(async () => {
     await owner?.dispose();

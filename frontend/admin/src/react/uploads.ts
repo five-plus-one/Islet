@@ -3,6 +3,7 @@ import { getAccessToken, type ImageItem } from "../api";
 export interface Task {
   id: string;
   file: File;
+  preview?: string;
   name: string;
   status: "waiting" | "uploading" | "done" | "error";
   progress: number;
@@ -48,6 +49,7 @@ export const uploads = {
       tasks.push({
         id: String(++serial),
         file,
+        preview: !error ? URL.createObjectURL(file) : undefined,
         name: file.name,
         status: error ? "error" : "waiting",
         progress: 0,
@@ -70,11 +72,13 @@ export const uploads = {
   remove(id: string) {
     const t = tasks.find((x) => x.id === id);
     if (t?.status === "uploading") active?.abort();
+    if (t?.preview) URL.revokeObjectURL(t.preview);
     tasks = tasks.filter((x) => x.id !== id);
     emit();
   },
   reset() {
     generation++;
+    tasks.forEach((t) => t.preview && URL.revokeObjectURL(t.preview));
     tasks = [];
     active?.abort();
     emit();
@@ -85,6 +89,9 @@ export const uploads = {
     );
   },
   clear() {
+    tasks
+      .filter((t) => t.status === "done")
+      .forEach((t) => t.preview && URL.revokeObjectURL(t.preview));
     tasks = tasks.filter((x) => x.status !== "done");
     emit();
   },

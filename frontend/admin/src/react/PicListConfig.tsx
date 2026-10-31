@@ -1,5 +1,10 @@
-import { useState } from "react";
-import { Button, Dialog, Field, Input } from "@fiveplusone/ui";
+import { useState, useRef } from "react";
+import { Button } from "@fiveplusone/ui";
+import {
+  ConnectionPanel,
+  ConnectionValue,
+} from "@fiveplusone/ui/media-workspace";
+import { Link2 } from "lucide-react";
 import { api } from "../api";
 import { copyText, errorText } from "../utils";
 import {
@@ -25,6 +30,7 @@ export function PicListConfig({
   const [policy, setPolicy] = useState("");
   const [album, setAlbum] = useState("");
   const [error, setError] = useState("");
+  const keyField = useRef<HTMLDivElement>(null);
   const body = JSON.stringify({
     ...(policy ? { policy_id: policy } : {}),
     ...(album ? { album_id: album } : {}),
@@ -33,6 +39,7 @@ export function PicListConfig({
   async function copy(value: string, needsKey = false) {
     if (needsKey && !key.trim()) {
       setError("请先填写上传密钥");
+      keyField.current?.querySelector("input")?.focus();
       return;
     }
     try {
@@ -43,43 +50,19 @@ export function PicListConfig({
       setError(errorText(e));
     }
   }
-  function item(
-    label: string,
-    value: string,
-    actual = value,
-    needsKey = false,
-  ) {
-    return (
-      <div className="islet-row" style={{ alignItems: "end" }}>
-        <div style={{ flex: "1 1 220px", minWidth: 0 }}>
-          <Field label={label}>
-            <Input readOnly value={value} />
-          </Field>
-        </div>
-        <Button
-          variant="secondary"
-          aria-label={"复制" + label}
-          onClick={() => copy(actual, needsKey)}
-        >
-          复制
-        </Button>
-      </div>
-    );
-  }
+  const template = config.data;
   return (
-    <Dialog
-      open
-      title="配置 PicList"
+    <ConnectionPanel
+      title="连接 PicList"
       onClose={onClose}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
-            完成
-          </Button>
           <Button
-            disabled={!config.data}
+            variant="ghost"
+            disabled={!template}
+            data-fp-tooltip="复制供 PicList Core 使用的 JSON 配置，包含上传密钥"
             onClick={() =>
-              config.data &&
+              template &&
               copy(
                 JSON.stringify(
                   {
@@ -87,7 +70,7 @@ export function PicListConfig({
                       uploader: "advancedplist",
                       current: "advancedplist",
                       advancedplist: {
-                        ...config.data,
+                        ...template,
                         uploader: undefined,
                         headers,
                         body,
@@ -101,70 +84,102 @@ export function PicListConfig({
               )
             }
           >
-            复制配置片段
+            复制 Core 配置
           </Button>
+          <Button onClick={onClose}>完成</Button>
         </>
       }
     >
-      <div className="islet-form">
-        <p>
-          在 PicList
-          的“图床”中选择“高级自定义”，新建配置并填写以下内容，保存后设为默认图床。
-        </p>
-        <TextField
-          label="上传密钥"
-          type="password"
-          value={key}
-          onChange={setKey}
-          hint="填写本人创建的密钥；关闭后清除本次填写内容。"
-        />
-        <Failure error={config.error} retry={config.reload} />
-        {config.loading && <Loading />}
-        {config.data && (
-          <>
-            {item("请求地址", config.data.endpoint)}
-            {item("请求方法", config.data.method)}
-            {item("文件字段", config.data.formDataKey)}
-            <Choice
-              label="存储策略"
-              value={policy}
-              onChange={setPolicy}
-              options={[
-                { value: "", label: "默认存储策略" },
-                ...me.policies.map((p) => ({
-                  value: String(p.id),
-                  label: p.name,
-                })),
-              ]}
-            />
-            <Choice
-              label="保存到相册"
-              value={album}
-              onChange={setAlbum}
-              options={[
-                { value: "", label: "不指定相册" },
-                ...(albums.data?.items || []).map((a) => ({
-                  value: String(a.id),
-                  label: a.name,
-                })),
-              ]}
-            />
-            <Failure error={albums.error} retry={albums.reload} />
-            {item(
-              "请求头",
-              '{"Authorization":"Bearer ••••••••"}',
-              headers,
-              true,
-            )}
-            {item("请求参数", body)}
-            {item("返回链接路径", config.data.resDataPath)}
-            <p className="fp-muted">
-              脚本、链接前缀和网站路径留空。配置片段含有上传密钥，请妥善保存。
-            </p>
-          </>
-        )}
-        <Failure error={error} />
+      <div className="fp-media-connect-intro">
+        <span>
+          <Link2 size={20} />
+        </span>
+        <div>
+          <h3>在 PicList 中添加「高级自定义」图床</h3>
+          <p>填写下面的配置，保存后设为默认图床，即可开始上传。</p>
+        </div>
       </div>
-    </Dialog>
+      <div className="fp-media-connect-fields">
+        <div ref={keyField} className="fp-media-connect-key">
+          <TextField
+            label="上传密钥"
+            type="password"
+            value={key}
+            onChange={(v) => {
+              setKey(v);
+              setError("");
+            }}
+            hint="粘贴你创建的上传密钥，用于生成请求头"
+          />
+        </div>
+        <Choice
+          label="保存到相册"
+          value={album}
+          onChange={setAlbum}
+          options={[
+            { value: "", label: "未分类" },
+            ...(albums.data?.items || []).map((a) => ({
+              value: String(a.id),
+              label: a.name,
+            })),
+          ]}
+        />
+        <Choice
+          label="存储位置"
+          value={policy}
+          onChange={setPolicy}
+          options={[
+            { value: "", label: "默认存储" },
+            ...me.policies.map((p) => ({ value: String(p.id), label: p.name })),
+          ]}
+        />
+      </div>
+      <Failure error={config.error} retry={config.reload} />
+      <Failure error={albums.error} retry={albums.reload} />
+      <Failure error={error} />
+      {config.loading && <Loading />}
+      {template && (
+        <>
+          <div className="fp-media-config-values">
+            <ConnectionValue
+              label="请求地址"
+              value={template.endpoint}
+              onCopy={() => void copy(template.endpoint)}
+            />
+            <ConnectionValue label="请求方法" value={template.method} />
+            <ConnectionValue
+              label="文件字段"
+              value={template.formDataKey}
+              onCopy={() => void copy(template.formDataKey)}
+            />
+            <ConnectionValue
+              label="请求头"
+              hint="JSON 格式"
+              value={
+                key.trim()
+                  ? '{"Authorization":"Bearer ••••••••"}'
+                  : "请先填写上方的上传密钥"
+              }
+              onCopy={() => void copy(headers, true)}
+            />
+            <ConnectionValue
+              label="请求参数"
+              hint="JSON 格式"
+              value={body}
+              onCopy={() => void copy(body)}
+            />
+            <ConnectionValue
+              label="返回链接路径"
+              value={template.resDataPath}
+              onCopy={() => void copy(template.resDataPath)}
+            />
+          </div>
+          <p className="fp-media-connect-note">
+            脚本、链接前缀和网站路径留空。请求头与 Core
+            配置包含上传密钥，请妥善保存。
+          </p>
+        </>
+      )}
+    </ConnectionPanel>
   );
 }

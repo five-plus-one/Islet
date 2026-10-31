@@ -10,7 +10,7 @@
     "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
-    "@fiveplusone/ui": "file:vendor/fiveplusone-ui-0.5.77.tgz",
+    "@fiveplusone/ui": "file:vendor/fiveplusone-ui-0.5.77-media.1.tgz",
     "lucide-react": "^0.468.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

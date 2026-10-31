@@ -5,10 +5,7 @@ import {
   Card,
   Dialog,
   EmptyState,
-  ResourceExplorer,
-  UploadQueue,
   ActionToolbar,
-  type ExplorerResource,
 } from "@fiveplusone/ui";
 import {
   Copy,
@@ -46,6 +43,14 @@ import {
 } from "./common";
 import { uploads, useUploads } from "./uploads";
 import { PicListConfig } from "./PicListConfig";
+import {
+  MediaDropzone,
+  MediaUploadResults,
+  MediaAlbumGrid,
+  MediaGallery,
+  ConnectionPanel,
+  ConnectionValue,
+} from "@fiveplusone/ui/media-workspace";
 function imagePreviewURL(url: string, item: ImageItem) {
   if (!item.moderated_at) return url;
   return (
@@ -66,6 +71,7 @@ export function Gallery({
     navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [query, setQuery] = useState(params.get("q") || "");
+  const [filters, setFilters] = useState(false);
   const [selected, setSelected] = useState<string[]>([]),
     [detail, setDetail] = useState<ImageItem>(),
     [format, setFormat] = useState<LinkFormat>("url"),
@@ -220,36 +226,56 @@ export function Gallery({
       setError(errorText(e));
     }
   }
-  const action = (name: string) => {
-    if (name === "share") void copy(chosen);
-    if (name === "rename" && chosen[0]) setDetail(chosen[0]);
-    if (name === "move") setMove(true);
-    if (name === "delete") setConfirm(recycled ? "purge" : "delete");
-    if (name === "restore") void batch((i) => api.restoreImage(i.id));
-  };
   return (
     <>
+      {album && !review && !recycled && (
+        <div className="fp-media-breadcrumb">
+          <Button variant="ghost" onClick={() => navigate("/albums")}>
+            返回相册
+          </Button>
+          <span>/</span>
+          <span>
+            {albums.data?.items.find((x) => String(x.id) === album)?.name ||
+              "相册"}
+          </span>
+        </div>
+      )}
       <Heading
-        title={review ? "图片审核" : recycled ? "回收站" : "图片库"}
+        title={
+          review
+            ? "图片审核"
+            : recycled
+              ? "回收站"
+              : albums.data?.items.find((x) => String(x.id) === album)?.name ||
+                "图片库"
+        }
         description={
           review
             ? "查看全站上传内容，管理图片的公开访问。"
             : recycled
               ? "找回最近移入回收站的图片，或永久删除不再需要的内容。"
-              : "把值得收藏的画面整理在一起，随时分享。"
+              : album
+                ? "浏览相册中的图片，选择图片可复制链接或移动位置。"
+                : "把值得收藏的画面整理在一起，随时分享。"
         }
         actions={
           !review ? (
-            <Button onClick={() => navigate("/upload")}>
+            <Button
+              onClick={() =>
+                navigate(
+                  album && !recycled ? `/upload?album=${album}` : "/upload",
+                )
+              }
+            >
               <Upload size={18} />
               上传图片
             </Button>
           ) : undefined
         }
       />
-      <Card>
+      <section className="fp-media-gallery-workspace">
         <form
-          className="islet-filters"
+          className="fp-media-gallery-filters"
           onSubmit={(e) => {
             e.preventDefault();
             filter("q", query);
@@ -273,29 +299,6 @@ export function Gallery({
               ]}
             />
           )}
-          <Choice
-            label="格式"
-            value={mime}
-            onChange={(v) => filter("mime", v)}
-            options={[
-              { value: "", label: "全部格式" },
-              ...["jpeg", "png", "gif", "webp", "avif"].map((x) => ({
-                value: "image/" + x,
-                label: x.toUpperCase(),
-              })),
-            ]}
-          />
-          {me.user.role !== "user" && !review && (
-            <Choice
-              label="查看范围"
-              value={scope}
-              onChange={(v) => filter("scope", v)}
-              options={[
-                { value: "mine", label: "我的图片" },
-                { value: "all", label: "全站图片" },
-              ]}
-            />
-          )}
           {review && (
             <Choice
               label="上传者"
@@ -310,23 +313,72 @@ export function Gallery({
               ]}
             />
           )}
-          <Choice
-            label="访问状态"
-            value={status}
-            onChange={(v) => filter("status", v)}
-            options={[
-              { value: "", label: "全部状态" },
-              { value: "active", label: "正常访问" },
-              { value: "blocked", label: "已禁止访问" },
-            ]}
-          />
-          {!review && (
+          {review ? (
             <Choice
-              label="复制格式"
+              label="访问状态"
+              value={status}
+              onChange={(v) => filter("status", v)}
+              options={[
+                { value: "", label: "全部状态" },
+                { value: "active", label: "正常访问" },
+                { value: "blocked", label: "已禁止访问" },
+              ]}
+            />
+          ) : (
+            <Choice
+              label="链接格式"
               value={format}
               onChange={(v) => setFormat(v as LinkFormat)}
               options={linkFormats}
             />
+          )}
+          <Button
+            variant="ghost"
+            aria-expanded={filters}
+            onClick={() => setFilters(!filters)}
+          >
+            {filters
+              ? "收起筛选"
+              : `更多筛选${mime || (!review && (status || scope === "all")) ? " · 已启用" : ""}`}
+          </Button>
+          {filters && (
+            <div className="fp-media-gallery-filter-extra">
+              <Choice
+                label="图片格式"
+                value={mime}
+                onChange={(v) => filter("mime", v)}
+                options={[
+                  { value: "", label: "全部格式" },
+                  ...["jpeg", "png", "gif", "webp", "avif"].map((x) => ({
+                    value: "image/" + x,
+                    label: x.toUpperCase(),
+                  })),
+                ]}
+              />
+              {me.user.role !== "user" && !review && (
+                <Choice
+                  label="查看范围"
+                  value={scope}
+                  onChange={(v) => filter("scope", v)}
+                  options={[
+                    { value: "mine", label: "我的图片" },
+                    { value: "all", label: "全站图片" },
+                  ]}
+                />
+              )}
+              {!review && (
+                <Choice
+                  label="访问状态"
+                  value={status}
+                  onChange={(v) => filter("status", v)}
+                  options={[
+                    { value: "", label: "全部状态" },
+                    { value: "active", label: "正常访问" },
+                    { value: "blocked", label: "已禁止访问" },
+                  ]}
+                />
+              )}
+            </div>
           )}
         </form>
         <Failure error={error} retry={() => void load()} />
@@ -340,19 +392,35 @@ export function Gallery({
           </p>
         )}
         {review && <Failure error={users.error} retry={users.reload} />}
-        <div className="islet-library-actions">
-          <span>
+        <div className="fp-media-gallery-actions">
+          <label>
+            <input
+              type="checkbox"
+              aria-label="选择当前已加载的全部图片"
+              checked={!!items.length && selected.length === items.length}
+              disabled={!items.length}
+              onChange={(e) =>
+                setSelected(
+                  e.target.checked ? items.map((x) => String(x.id)) : [],
+                )
+              }
+            />
             {selected.length
               ? `已选择 ${selected.length} 张`
               : `已加载 ${items.length} 张`}
-          </span>
+          </label>
           <ActionToolbar
             label="图片操作"
             actions={[
               {
                 id: "refresh",
                 label: "刷新图片",
-                icon: <RefreshCw size={18} />,
+                icon: (
+                  <>
+                    <RefreshCw size={16} />
+                    <span>刷新</span>
+                  </>
+                ),
                 onSelect: () => void load(),
                 disabled: busy,
               },
@@ -361,7 +429,12 @@ export function Gallery({
                     {
                       id: "block",
                       label: "禁止访问",
-                      icon: <ShieldBan size={18} />,
+                      icon: (
+                        <>
+                          <ShieldBan size={16} />
+                          <span>禁止访问</span>
+                        </>
+                      ),
                       danger: true,
                       onSelect: () =>
                         setModeration({
@@ -373,7 +446,12 @@ export function Gallery({
                     {
                       id: "allow",
                       label: "恢复访问",
-                      icon: <ShieldCheck size={18} />,
+                      icon: (
+                        <>
+                          <ShieldCheck size={16} />
+                          <span>恢复访问</span>
+                        </>
+                      ),
                       onSelect: () =>
                         setModeration({
                           items: chosen.filter((x) => x.blocked),
@@ -388,21 +466,36 @@ export function Gallery({
                     {
                       id: "copy",
                       label: "复制所选链接",
-                      icon: <Copy size={18} />,
+                      icon: (
+                        <>
+                          <Copy size={16} />
+                          <span>复制链接</span>
+                        </>
+                      ),
                       onSelect: () => void copy(chosen),
                       disabled: !chosen.length,
                     },
                     {
                       id: "move",
                       label: "移动到相册",
-                      icon: <FolderInput size={18} />,
+                      icon: (
+                        <>
+                          <FolderInput size={16} />
+                          <span>移动</span>
+                        </>
+                      ),
                       onSelect: () => setMove(true),
                       disabled: !chosen.length || !canMove || busy || recycled,
                     },
                     {
                       id: "delete",
                       label: recycled ? "永久删除" : "移入回收站",
-                      icon: <Trash2 size={18} />,
+                      icon: (
+                        <>
+                          <Trash2 size={16} />
+                          <span>删除</span>
+                        </>
+                      ),
                       onSelect: () => setConfirm(recycled ? "purge" : "delete"),
                       danger: true,
                       disabled: !chosen.length || !allowed || busy,
@@ -414,7 +507,12 @@ export function Gallery({
                     {
                       id: "restore",
                       label: "恢复图片",
-                      icon: <RotateCcw size={18} />,
+                      icon: (
+                        <>
+                          <RotateCcw size={16} />
+                          <span>恢复</span>
+                        </>
+                      ),
                       onSelect: () => void batch((i) => api.restoreImage(i.id)),
                       disabled: !chosen.length || !allowed || busy,
                     },
@@ -423,31 +521,67 @@ export function Gallery({
             ]}
           />
         </div>
-        <div className="islet-explorer">
-          <ResourceExplorer
-            media
-            defaultView="grid"
-            showSearch={false}
-            items={items.map((x) => ({
-              id: String(x.id),
-              kind: "file",
-              name: x.original_name,
-              size: x.size,
-              modifiedAt: x.created_at,
-              thumbnailUrl: imagePreviewURL(x.thumb_url || x.url, x),
-            }))}
-            query=""
-            onQueryChange={() => {}}
-            folderId={null}
-            onFolderChange={() => {}}
-            selectedIds={selected}
-            onSelectionChange={setSelected}
-            onOpen={(x) => setDetail(items.find((i) => String(i.id) === x.id))}
-            availableActions={[]}
-            loading={loading && !items.length}
-            error={error}
-          />
-        </div>
+        <MediaGallery
+          items={items.map((x) => ({
+            id: String(x.id),
+            name: x.original_name,
+            preview: imagePreviewURL(x.thumb_url || x.url, x),
+            description: `${humanBytes(x.size)} · ${x.width} × ${x.height}${review && x.username ? ` · ${x.username}` : ""}`,
+            blocked: x.blocked,
+            status:
+              x.cache_sync !== "complete"
+                ? "正在同步访问状态"
+                : x.blocked
+                  ? "已禁止访问"
+                  : undefined,
+          }))}
+          selected={selected}
+          onSelectionChange={setSelected}
+          onOpen={(id) => setDetail(items.find((x) => String(x.id) === id))}
+          onCopy={
+            !review && !recycled
+              ? (id) => {
+                  const item = items.find((x) => String(x.id) === id);
+                  if (item) void copy([item]);
+                }
+              : undefined
+          }
+          empty={
+            loading ? (
+              <Loading />
+            ) : (
+              <EmptyState
+                title={
+                  params.get("q") || mime || status || owner
+                    ? "没有找到图片"
+                    : recycled
+                      ? "回收站是空的"
+                      : album
+                        ? "相册还没有图片"
+                        : "开始收藏你的第一张图片"
+                }
+                description={
+                  params.get("q") || mime || status || owner
+                    ? "试试其他关键词或筛选条件。"
+                    : recycled
+                      ? "移入回收站的图片会显示在这里。"
+                      : "选择、拖入或粘贴图片，上传后即可分享。"
+                }
+                action={
+                  !review && !recycled ? (
+                    <Button
+                      onClick={() =>
+                        navigate(album ? `/upload?album=${album}` : "/upload")
+                      }
+                    >
+                      上传图片
+                    </Button>
+                  ) : undefined
+                }
+              />
+            )
+          }
+        />
         {more && (
           <Button
             variant="secondary"
@@ -457,7 +591,7 @@ export function Gallery({
             加载更多
           </Button>
         )}
-      </Card>
+      </section>
       {detail && (
         <ImageDetails
           item={detail}
@@ -852,8 +986,9 @@ export function UploadPage() {
     navigate = useNavigate(),
     tasks = useUploads(),
     albums = useLoad(api.albums);
-  const input = useRef<HTMLInputElement>(null);
-  const [album, setAlbum] = useState(""),
+  const [params] = useSearchParams();
+  const [preview, setPreview] = useState<ImageItem>();
+  const [album, setAlbum] = useState(params.get("album") || ""),
     [policy, setPolicy] = useState(""),
     [tags, setTags] = useState(""),
     [format, setFormat] = useState<LinkFormat>("url"),
@@ -885,123 +1020,127 @@ export function UploadPage() {
     window.addEventListener("paste", paste);
     return () => window.removeEventListener("paste", paste);
   }, [album, policy, tags, max]);
+  async function copy(ids?: string[]) {
+    const done = tasks.filter((t) => t.result && (!ids || ids.includes(t.id)));
+    if (!done.length) return;
+    try {
+      await copyText(done.map((t) => imageLink(t.result!, format)).join("\n"));
+      setError("");
+      notify(`已复制 ${done.length} 个链接`);
+    } catch (e) {
+      setError(errorText(e));
+    }
+  }
   return (
     <>
       <Heading
         title="上传图片"
-        description="选择、拖拽或粘贴图片，上传后即可分享。"
+        description="上传、取链，一次完成。支持拖拽和粘贴多张图片。"
         actions={
-          <Button variant="secondary" onClick={() => navigate("/images")}>
-            查看图片库
+          <Button
+            variant="secondary"
+            onClick={() =>
+              navigate(album ? `/images?album=${album}` : "/images")
+            }
+          >
+            查看{album ? "相册" : "图片库"}
           </Button>
         }
       />
-      <div className="islet-upload-layout">
-        <div>
-          <Card>
-            <div
-              className="islet-drop"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                add(Array.from(e.dataTransfer.files));
-              }}
-            >
-              <Upload size={38} />
-              <h2>将图片拖到这里</h2>
-              <p>也可以点击选择，或直接粘贴图片</p>
-              <Button onClick={() => input.current?.click()}>选择图片</Button>
-              <input
-                hidden
-                type="file"
-                multiple
-                accept="image/*"
-                ref={input}
-                onChange={(e) => {
-                  add(Array.from(e.target.files || []));
-                  e.target.value = "";
-                }}
-              />
-              <small>单张最大 {humanBytes(max)}</small>
-            </div>
-          </Card>
-          <Card>
-            <div className="islet-library-actions">
-              <h2>上传队列</h2>
-              <Button variant="ghost" onClick={() => uploads.clear()}>
-                清除已完成
-              </Button>
-            </div>
-            <UploadQueue
-              tasks={tasks}
-              onRetry={uploads.retry}
-              onCancel={uploads.remove}
-              onDismiss={uploads.remove}
-            />
-            <Failure error={error} />
-            {tasks.some((x) => x.result) && (
-              <Button
-                onClick={async () => {
-                  try {
-                    await copyText(
-                      tasks
-                        .filter((x) => x.result)
-                        .map((x) => imageLink(x.result!, format))
-                        .join("\n"),
-                    );
-                    notify("链接已复制");
-                  } catch (e) {
-                    setError(errorText(e));
-                  }
-                }}
-              >
-                <Copy size={17} />
-                复制本次上传链接
-              </Button>
-            )}
-          </Card>
-        </div>
-        <Card>
-          <h2>上传设置</h2>
-          <div className="islet-form">
-            <Choice
-              label="保存到相册"
-              value={album}
-              onChange={setAlbum}
-              options={[
-                { value: "", label: "未分类" },
-                ...(albums.data?.items || []).map((x) => ({
-                  value: String(x.id),
-                  label: x.name,
-                })),
-              ]}
-            />
-            <Choice
-              label="存储位置"
-              value={policy}
-              onChange={setPolicy}
-              options={[
-                { value: "", label: "默认存储" },
-                ...me.policies.map((x) => ({
-                  value: String(x.id),
-                  label: x.name,
-                })),
-              ]}
-            />
-            <TextField label="标签" value={tags} onChange={setTags} />
-            <Choice
-              label="复制链接格式"
-              value={format}
-              onChange={(v) => setFormat(v as LinkFormat)}
-              options={linkFormats}
-            />
-            <p className="fp-muted">
-              已使用 {humanBytes(me.quota.used)} · {groupLabel(me.group.name)}
-            </p>
-            <Failure error={albums.error} retry={albums.reload} />
-          </div>
-        </Card>
-      </div>
+      <section className="fp-media-upload-options" aria-label="图片保存位置">
+        <Choice
+          label="保存到相册"
+          value={album}
+          onChange={setAlbum}
+          options={[
+            { value: "", label: "未分类" },
+            ...(albums.data?.items || []).map((x) => ({
+              value: String(x.id),
+              label: x.name,
+            })),
+          ]}
+        />
+        <Choice
+          label="存储位置"
+          value={policy}
+          onChange={setPolicy}
+          options={[
+            { value: "", label: "默认存储" },
+            ...me.policies.map((x) => ({ value: String(x.id), label: x.name })),
+          ]}
+        />
+        <details>
+          <summary>添加标签</summary>
+          <TextField
+            label="标签"
+            value={tags}
+            onChange={setTags}
+            hint="多个标签用逗号分隔，应用于接下来上传的图片"
+          />
+        </details>
+      </section>
+      <Failure error={albums.error} retry={albums.reload} />
+      <MediaDropzone
+        onFiles={add}
+        limit={humanBytes(max)}
+        compact={tasks.length > 0}
+      />
+      <Failure error={error} />
+      <MediaUploadResults
+        items={tasks.map((t) => ({
+          id: t.id,
+          name: t.name,
+          size: humanBytes(t.file.size),
+          preview: t.preview,
+          status: t.status,
+          progress: t.progress,
+          error: t.error,
+          canRetry: !t.blocked,
+          link: t.result ? imageLink(t.result, format) : undefined,
+        }))}
+        formatControl={
+          <Choice
+            label="链接格式"
+            value={format}
+            onChange={(v) => setFormat(v as LinkFormat)}
+            options={linkFormats}
+          />
+        }
+        onCopy={(id) => void copy([id])}
+        onCopyAll={() => void copy()}
+        onRetry={uploads.retry}
+        onRemove={uploads.remove}
+        onClear={uploads.clear}
+        onOpen={(id) => {
+          const t = tasks.find((t) => t.id === id);
+          if (t?.result) setPreview(t.result);
+        }}
+      />
+      {preview && (
+        <ConnectionPanel
+          title={preview.original_name}
+          onClose={() => setPreview(undefined)}
+          footer={<Button onClick={() => setPreview(undefined)}>完成</Button>}
+        >
+          <img
+            className="islet-preview"
+            src={preview.url}
+            alt={preview.original_name}
+          />
+          <ConnectionValue
+            label="图片链接"
+            value={imageLink(preview, format)}
+            onCopy={async () => {
+              try {
+                await copyText(imageLink(preview, format));
+                notify("链接已复制");
+              } catch (e) {
+                setError(errorText(e));
+              }
+            }}
+          />
+        </ConnectionPanel>
+      )}
     </>
   );
 }
@@ -1043,29 +1182,23 @@ export function Albums() {
           action={<Button onClick={() => open({})}>新建相册</Button>}
         />
       ) : (
-        <div className="islet-card-grid">
-          {data.data.items.map((x) => (
-            <Card key={x.id}>
-              <Button
-                variant="ghost"
-                onClick={() => navigate("/images?album=" + x.id)}
-              >
-                <ImageIcon size={28} />
-                <h2>{x.name}</h2>
-              </Button>
-              <p>{x.description || "留住每一份灵感"}</p>
-              <small>{x.image_count || 0} 张图片</small>
-              <div className="islet-row">
-                <Button variant="secondary" onClick={() => open(x)}>
-                  编辑
-                </Button>
-                <Button variant="ghost" onClick={() => setRemove(x)}>
-                  删除相册
-                </Button>
-              </div>
-            </Card>
-          ))}
-        </div>
+        <MediaAlbumGrid
+          albums={data.data.items.map((x) => ({
+            id: String(x.id),
+            name: x.name,
+            description: x.description,
+            count: x.image_count || 0,
+            cover: x.cover_url,
+          }))}
+          onOpen={(id) => navigate("/images?album=" + id)}
+          onEdit={(id) => {
+            const x = data.data?.items.find((x) => String(x.id) === id);
+            if (x) open(x);
+          }}
+          onDelete={(id) =>
+            setRemove(data.data?.items.find((x) => String(x.id) === id))
+          }
+        />
       )}
       <Dialog
         open={!!edit}
@@ -1133,6 +1266,7 @@ export function Tokens() {
     [busy, setBusy] = useState(false),
     [remove, setRemove] = useState<number>();
   const [picList, setPicList] = useState<{ key: string }>();
+  const [picGo, setPicGo] = useState(false);
   return (
     <>
       <Heading
@@ -1152,44 +1286,105 @@ export function Tokens() {
         }
       />
       <Failure error={data.error} retry={data.reload} />
-      <div className="islet-card-grid">
-        {data.data?.items.map((x) => (
-          <Card key={x.id}>
-            <h2>{x.name}</h2>
-            <p>{x.status === "active" ? "使用中" : "已撤销"}</p>
-            <p className="fp-muted">
-              创建于 {dateLabel(x.created_at)}
-              <br />
-              到期：{x.expires_at ? dateLabel(x.expires_at) : "长期有效"}
-            </p>
-            {x.status === "active" && (
-              <Button variant="secondary" onClick={() => setRemove(x.id)}>
-                撤销密钥
+      <section className="fp-media-client-card">
+        <div>
+          <h2>连接上传工具</h2>
+          <p>为每个客户端创建独立密钥，随时管理它的上传权限。</p>
+        </div>
+        <div>
+          <Button variant="secondary" onClick={() => setPicList({ key: "" })}>
+            连接 PicList
+          </Button>
+          <Button variant="ghost" onClick={() => setPicGo(true)}>
+            连接 PicGo
+          </Button>
+        </div>
+      </section>
+      {data.data?.items.length ? (
+        <section className="fp-media-token-list" aria-label="上传密钥列表">
+          {data.data.items.map((x) => (
+            <article className="fp-media-token-row" key={x.id}>
+              <div>
+                <h2>{x.name}</h2>
+                <p>
+                  创建于 {dateLabel(x.created_at)} ·{" "}
+                  {x.expires_at
+                    ? `到期于 ${dateLabel(x.expires_at)}`
+                    : "长期有效"}
+                </p>
+              </div>
+              <div className="fp-media-token-meta">
+                <span>{x.status === "active" ? "使用中" : "已撤销"}</span>
+                {x.status === "active" && (
+                  <Button variant="secondary" onClick={() => setRemove(x.id)}>
+                    撤销密钥
+                  </Button>
+                )}
+              </div>
+            </article>
+          ))}
+        </section>
+      ) : (
+        !data.loading && (
+          <EmptyState
+            title="创建第一个上传密钥"
+            description="连接 PicList、PicGo 或其他上传工具。"
+            action={
+              <Button
+                onClick={() => {
+                  setName("");
+                  setExpiry("");
+                  setError("");
+                  setOpen(true);
+                }}
+              >
+                创建密钥
               </Button>
-            )}
-          </Card>
-        ))}
-      </div>
+            }
+          />
+        )
+      )}
       {data.loading && <Loading />}
-      <Card>
-        <h2>连接 PicList</h2>
-        <p>使用高级自定义图床上传，可选择存储策略与相册。</p>
-        <Button variant="secondary" onClick={() => setPicList({ key: "" })}>
-          配置 PicList
-        </Button>
-        <h3>连接 PicGo</h3>
-        <p>
-          选择自定义上传，使用 POST 与 multipart/form-data，文件字段填写 files。
-        </p>
-        <TextField
-          label="上传地址"
-          value={
-            (me.public_base_url || location.origin) + "/api/v1/upload?picgo=1"
-          }
-          onChange={() => {}}
-        />
-        <p>请求头 Authorization 填写 Bearer 加一个空格，再接你的上传密钥。</p>
-      </Card>
+      {picGo && (
+        <ConnectionPanel
+          title="连接 PicGo"
+          onClose={() => setPicGo(false)}
+          footer={<Button onClick={() => setPicGo(false)}>完成</Button>}
+        >
+          <div className="fp-media-connect-intro">
+            <div>
+              <h3>添加自定义上传图床</h3>
+              <p>
+                使用 multipart/form-data 上传，Authorization 填写
+                Bearer、一个空格和你的上传密钥。
+              </p>
+            </div>
+          </div>
+          <div className="fp-media-config-values">
+            <ConnectionValue
+              label="上传地址"
+              value={
+                (me.public_base_url || location.origin) +
+                "/api/v1/upload?picgo=1"
+              }
+              onCopy={async () => {
+                try {
+                  await copyText(
+                    (me.public_base_url || location.origin) +
+                      "/api/v1/upload?picgo=1",
+                  );
+                  notify("上传地址已复制");
+                } catch (e) {
+                  setError(errorText(e));
+                }
+              }}
+            />
+            <ConnectionValue label="请求方法" value="POST" />
+            <ConnectionValue label="文件字段" value="files" />
+          </div>
+          <Failure error={error} />
+        </ConnectionPanel>
+      )}
       <Dialog
         open={open}
         title="创建上传密钥"

@@ -3,6 +3,7 @@ import { BrowserRouter } from "react-router-dom";
 import { TooltipProvider } from "@fiveplusone/ui";
 import "@fiveplusone/ui/styles.css";
 import "@fiveplusone/ui/app-surfaces.css";
+import "@fiveplusone/ui/media-workspace.css";
 import "./style.css";
 import { App } from "./App";
 document.documentElement.dataset.product = "brand";

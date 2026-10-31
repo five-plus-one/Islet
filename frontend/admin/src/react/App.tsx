@@ -16,6 +16,7 @@ import {
   Toast,
 } from "@fiveplusone/ui";
 import { AppEntryLayout } from "@fiveplusone/ui/app-surfaces";
+import { MediaWorkspaceFrame } from "@fiveplusone/ui/media-workspace";
 import {
   Images,
   Upload,
@@ -381,15 +382,32 @@ function Workspace({ theme }: { theme: React.ReactNode }) {
         <strong>Islet</strong>
         <span>{branding.data?.site_title || "图片工作台"}</span>
       </div>
-      <ProductNavigation
-        variant="sidebar"
-        items={items}
-        value={loc.pathname}
-        onChange={(path) => {
-          navigate(path);
-          setMobile(false);
-        }}
-      />
+      <div className="fp-media-nav-area">
+        <ProductNavigation
+          variant="sidebar"
+          items={items.slice(0, 6)}
+          value={loc.pathname}
+          onChange={(path) => {
+            navigate(path);
+            setMobile(false);
+          }}
+        />
+        {admin && (
+          <>
+            <span className="fp-media-nav-group-label">管理</span>
+            <ProductNavigation
+              variant="sidebar"
+              label="管理导航"
+              items={items.slice(6)}
+              value={loc.pathname}
+              onChange={(path) => {
+                navigate(path);
+                setMobile(false);
+              }}
+            />
+          </>
+        )}
+      </div>
       <footer className="islet-capacity">
         <RepositoryLink />
         <span>我的空间</span>
@@ -407,10 +425,10 @@ function Workspace({ theme }: { theme: React.ReactNode }) {
   );
   return (
     <Session.Provider value={{ me, refresh, notify: setMessage }}>
-      <div className="islet-shell">
-        <aside className="islet-sidebar">{nav}</aside>
-        <div className="islet-workspace">
-          <header className="islet-topbar">
+      <MediaWorkspaceFrame
+        sidebar={nav}
+        header={
+          <>
             <Button
               variant="ghost"
               className="islet-mobile-nav"
@@ -451,43 +469,42 @@ function Workspace({ theme }: { theme: React.ReactNode }) {
                 }
               />
             </div>
-          </header>
-          <main className="islet-content">
-            <Failure error={error} retry={() => void refresh()} />
-            <Routes>
-              <Route path="/" element={<Navigate to="/images" replace />} />
-              <Route path="/images" element={<Gallery />} />
-              <Route path="/trash" element={<Gallery recycled />} />
-              <Route path="/upload" element={<UploadPage />} />
-              <Route path="/albums" element={<Albums />} />
-              <Route path="/tokens" element={<Tokens />} />
-              <Route path="/profile" element={<Profile />} />
+          </>
+        }
+      >
+        <Failure error={error} retry={() => void refresh()} />
+        <Routes>
+          <Route path="/" element={<Navigate to="/images" replace />} />
+          <Route path="/images" element={<Gallery />} />
+          <Route path="/trash" element={<Gallery recycled />} />
+          <Route path="/upload" element={<UploadPage />} />
+          <Route path="/albums" element={<Albums />} />
+          <Route path="/tokens" element={<Tokens />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route
+            path="/moderation"
+            element={
+              admin ? <Gallery review /> : <Navigate to="/images" replace />
+            }
+          />
+          {["overview", "policies", "groups", "users", "settings"].map(
+            (path) => (
               <Route
-                path="/moderation"
+                key={path}
+                path={"/" + path}
                 element={
-                  admin ? <Gallery review /> : <Navigate to="/images" replace />
+                  admin ? (
+                    <AdminPage kind={path} />
+                  ) : (
+                    <Navigate to="/images" replace />
+                  )
                 }
               />
-              {["overview", "policies", "groups", "users", "settings"].map(
-                (path) => (
-                  <Route
-                    key={path}
-                    path={"/" + path}
-                    element={
-                      admin ? (
-                        <AdminPage kind={path} />
-                      ) : (
-                        <Navigate to="/images" replace />
-                      )
-                    }
-                  />
-                ),
-              )}
-              <Route path="*" element={<Navigate to="/images" replace />} />
-            </Routes>
-          </main>
-        </div>
-      </div>
+            ),
+          )}
+          <Route path="*" element={<Navigate to="/images" replace />} />
+        </Routes>
+      </MediaWorkspaceFrame>
       <Dialog
         drawer
         open={mobile}

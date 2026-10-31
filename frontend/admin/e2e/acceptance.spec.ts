@@ -303,6 +303,11 @@ test.describe.serial("Account and storage API acceptance", () => {
       album_id: String(album.ID),
       tags: "海边,旅行",
     });
+    const albumList = await call(member, "/api/v1/albums");
+    const albumView = albumList.items.find((x: any) => x.id === album.ID);
+    expect(albumView.image_count).toBe(1);
+    expect(albumView.cover_url).toBe(memberImage.thumb_url);
+    expect((await call(outsider, "/api/v1/albums")).items).toHaveLength(0);
     const mine = await call(member, "/api/v1/images?scope=all&user_id=1");
     expect(mine.items).toHaveLength(1);
     expect(mine.items[0].id).toBe(memberImage.id);
@@ -371,6 +376,11 @@ test.describe.serial("Account and storage API acceptance", () => {
     expect(image.status()).toBe(200);
     expect(image.headers()["content-type"]).toContain("image/png");
     await call(member, `/api/v1/images/${memberImage.id}`, "DELETE");
+    const recycledAlbum = (await call(member, "/api/v1/albums")).items.find(
+      (x: any) => x.id === album.ID,
+    );
+    expect(recycledAlbum.image_count).toBe(0);
+    expect(recycledAlbum.cover_url).toBe("");
     expect(
       (await call(member, "/api/v1/images?recycled=1")).items,
     ).toHaveLength(1);

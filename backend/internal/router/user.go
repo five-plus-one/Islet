@@ -314,12 +314,19 @@ func registerAlbumRoutes(group *gin.RouterGroup, deps *Deps) {
 			return
 		}
 		items := make([]gin.H, 0, len(albums))
+		counts, covers, err := deps.Albums.Contents(user.ID)
+		if err != nil {
+			response.ServerError(c, "查询相册内容失败")
+			return
+		}
 		for _, album := range albums {
-			var count int64
-			_ = deps.DB.Model(&model.Image{}).Where("album_id = ? AND deleted_at IS NULL", album.ID).Count(&count).Error
+			coverURL := ""
+			if cover, ok := covers[album.ID]; ok {
+				coverURL = deps.Images.ItemView(cover).ThumbURL
+			}
 			items = append(items, gin.H{
 				"id": album.ID, "name": album.Name, "description": album.Description,
-				"image_count": count, "created_at": album.CreatedAt,
+				"image_count": counts[album.ID], "cover_url": coverURL, "created_at": album.CreatedAt,
 			})
 		}
 		response.OK(c, gin.H{"items": items})

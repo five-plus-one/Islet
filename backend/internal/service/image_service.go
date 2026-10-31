@@ -394,6 +394,38 @@ func (s *AlbumService) List(userID uint64) ([]model.Album, error) {
 	return albums, err
 }
 
+// AlbumContents derives the visible count and latest cover without changing stored albums.
+func (s *AlbumService) Contents(userID uint64) (map[uint64]int64, map[uint64]model.Image, error) {
+	var rows []struct {
+		AlbumID uint64
+		Count   int64
+		CoverID uint64
+	}
+	err := s.db.Model(&model.Image{}).Select("album_id, COUNT(*) AS count, MAX(id) AS cover_id").Where("user_id = ? AND album_id IS NOT NULL", userID).Group("album_id").Scan(&rows).Error
+	if err != nil {
+		return nil, nil, err
+	}
+	counts, covers := make(map[uint64]int64), make(map[uint64]model.Image)
+	ids := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		counts[row.AlbumID] = row.Count
+		ids = append(ids, row.CoverID)
+	}
+	if len(ids) == 0 {
+		return counts, covers, nil
+	}
+	var images []model.Image
+	if err := s.db.Where("id IN ? AND user_id = ?", ids, userID).Find(&images).Error; err != nil {
+		return nil, nil, err
+	}
+	for _, image := range images {
+		if image.AlbumID != nil {
+			covers[*image.AlbumID] = image
+		}
+	}
+	return counts, covers, nil
+}
+
 func (s *AlbumService) Create(userID uint64, in AlbumInput) (model.Album, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" || len([]rune(name)) > 64 {

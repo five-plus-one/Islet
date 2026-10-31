@@ -225,6 +225,7 @@ export interface AlbumView {
   name: string;
   description: string;
   image_count?: number;
+  cover_url?: string;
   created_at: string;
 }
 

@@ -11,6 +11,7 @@
 | [storage.md](storage.md) | 存储策略：驱动抽象、密钥加密、URL 生成 |
 | [image-moderation.md](image-moderation.md) | 全站图片审核、限制访问、复核与恢复 |
 | [piclist.md](piclist.md) | PicList 高级自定义上传配置与密钥使用 |
+| [acceptance-moderation-2026-10-31.md](acceptance-moderation-2026-10-31.md) | 图片审核、CDN 缓存同步与 PicList 上线验收 |
 | [shared-ui-deployment.md](shared-ui-deployment.md) | 共享组件、账户与图库迁移方案 |
 | [acceptance-2026-10-29.md](acceptance-2026-10-29.md) | React 工作台、公网发布与恢复记录 |
 

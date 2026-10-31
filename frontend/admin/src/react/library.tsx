@@ -418,7 +418,7 @@ export function Gallery({
                 icon: (
                   <>
                     <RefreshCw size={16} />
-                    <span>刷新</span>
+                    <span className="fp-media-action-label">刷新</span>
                   </>
                 ),
                 onSelect: () => void load(),
@@ -432,7 +432,7 @@ export function Gallery({
                       icon: (
                         <>
                           <ShieldBan size={16} />
-                          <span>禁止访问</span>
+                          <span className="fp-media-action-label">禁止访问</span>
                         </>
                       ),
                       danger: true,
@@ -449,7 +449,7 @@ export function Gallery({
                       icon: (
                         <>
                           <ShieldCheck size={16} />
-                          <span>恢复访问</span>
+                          <span className="fp-media-action-label">恢复访问</span>
                         </>
                       ),
                       onSelect: () =>
@@ -469,7 +469,7 @@ export function Gallery({
                       icon: (
                         <>
                           <Copy size={16} />
-                          <span>复制链接</span>
+                          <span className="fp-media-action-label">复制链接</span>
                         </>
                       ),
                       onSelect: () => void copy(chosen),
@@ -481,7 +481,7 @@ export function Gallery({
                       icon: (
                         <>
                           <FolderInput size={16} />
-                          <span>移动</span>
+                          <span className="fp-media-action-label">移动</span>
                         </>
                       ),
                       onSelect: () => setMove(true),
@@ -493,7 +493,7 @@ export function Gallery({
                       icon: (
                         <>
                           <Trash2 size={16} />
-                          <span>删除</span>
+                          <span className="fp-media-action-label">删除</span>
                         </>
                       ),
                       onSelect: () => setConfirm(recycled ? "purge" : "delete"),
@@ -510,7 +510,7 @@ export function Gallery({
                       icon: (
                         <>
                           <RotateCcw size={16} />
-                          <span>恢复</span>
+                          <span className="fp-media-action-label">恢复</span>
                         </>
                       ),
                       onSelect: () => void batch((i) => api.restoreImage(i.id)),

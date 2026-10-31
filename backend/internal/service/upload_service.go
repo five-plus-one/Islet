@@ -231,6 +231,11 @@ func (s *UploadService) upload(ctx context.Context, in UploadInput) (UploadResul
 	}
 
 	// 9. 落库
+	base, _ := s.policies.distribution(policy.ID)
+	url = base + "/i/" + key
+	if thumbKey != "" {
+		thumbURL = base + "/t/" + key
+	}
 	record := model.Image{
 		UserID: in.UserID, PolicyID: policyID, AlbumID: in.AlbumID,
 		StorageKey: key, URL: url, OriginalName: sanitizeName(in.FileName),

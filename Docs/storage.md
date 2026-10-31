@@ -4,9 +4,9 @@
 
 上传只使用启用且用户分组允许的策略；已有图片通过读取驱动继续访问，即使策略已停用。被图片引用的策略不能删除，也不能直接更改驱动、端点、桶或路径前缀。引用检查包含回收站。
 
-本地文件使用排他创建，S3 使用条件写入，避免同名对象覆盖。未配置 CDN 的对象存储由 Islet 公网图片端点代理读取；配置 CDN 时可使用 CDN 地址。缩略图通过 `/t/{原图 storage key}` 访问，由服务端查找对应缩略对象。
+本地文件使用排他创建，S3 使用条件写入，避免同名对象覆盖。图片分享与缩略图统一通过 Islet `/i/{key}`、`/t/{key}` 访问，检查审核状态后再读取存储。对象存储使用私有读取；CDN 如需保留已发布链接，应回源到受控图片入口，禁止跳过状态校验。详见 [图片审核](image-moderation.md)。
 
-永久删除要求图片处于回收状态；对象删除失败时保留数据库记录以便重试。恢复与永久删除使用图片行锁协调。公开图片可能被客户端或 CDN 缓存，回收站不承担即时撤回缓存的职责。
+永久删除要求图片处于回收状态；对象删除失败时保留数据库记录以便重试。恢复与永久删除使用图片行锁协调。回收、恢复、永久删除均生成持久化缓存刷新任务，后台自动重试并查询全网完成结果。
 
 ## 驱动抽象
 
@@ -28,8 +28,7 @@ type Driver interface {
 - **local**：写 `{DATA_DIR}/uploads/{key}`，URL = `{site.public_base_url}/i/{key}`，经公网端口流式返回。无敏感配置。
 - **s3**：minio-go 客户端，覆盖阿里云 OSS、腾讯 COS、MinIO、R2 等 S3 兼容服务。
   - endpoint 归一化：`oss-cn-hangzhou.aliyuncs.com` → `s3.oss-cn-hangzhou.aliyuncs.com`（虚拟主机风格），地域从 host 推导校验。
-  - url_mode=`direct`：URL = `{cdn or endpoint公网}/{bucket}/{prefix}/{key}`，访问 302 跳转。
-  - url_mode=`proxy`：URL = `{site.public_base_url}/i/{key}`，访问经应用回源转发（隐藏源站，消耗应用带宽）。
+  - 加速域名回源至应用图片入口；开启阿里云缓存同步后，图片默认返回 CDN 链接，节点缓存 30 天，浏览器每次校验。访问变更自动刷新原图、缩略图及历史路径。未配置加速时由应用流式读取，`url_mode` 保留兼容。
   - 错误翻译为可操作的中文提示（NoSuchBucket / InvalidAccessKeyId / SignatureDoesNotMatch 等，沿用 GravityLink 的映射）。
 
 ## 密钥安全
@@ -54,7 +53,7 @@ key 全程校验：禁止 `..`、反斜杠、绝对路径；local 驱动写入�
 3. 配额校验：`SUM(images.size) WHERE user_id=? AND deleted_at IS NULL` + 本次 ≤ quota_bytes。
 4. 去重：`(user_id, sha256)` 已存在（未删除）→ 直接返回既有记录（PicGo 响应同）。
 5. 写入：原图 + 缩略图（最长边 480px，不透明 JPEG q82 / 含透明 PNG）。
-6. 落库固化最终 URL；策略删除/切换不影响既有 URL。
+6. 落库保留发布地址；读取列表与上传结果按当前策略返回受控分发链接。已有图片的存储位置与已启用的加速域名受保护，仍有未完成同步任务时不能删除策略。
 
 ## OSS 条件写入
 OSS 使用原生 PutObject 的 x-oss-forbid-overwrite 防覆盖请求；普通 S3 使用 If-None-Match。连接检查复用实际上传并回读校验。参考：https://www.alibabacloud.com/help/en/oss/developer-reference/putobject 。

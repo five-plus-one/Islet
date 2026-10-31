@@ -147,14 +147,38 @@ func meQuota(deps *Deps, user middleware.AuthUser) (limit uint64, used uint64) {
 
 // registerImageManageRoutes 用户侧图库 / 回收站。
 func registerImageManageRoutes(group *gin.RouterGroup, deps *Deps) {
+	group.GET("/images/cache-sync", func(c *gin.Context) {
+		parts := strings.Split(c.Query("ids"), ",")
+		if len(parts) > 100 {
+			response.BadRequest(c, "一次最多查询 100 张图片")
+			return
+		}
+		ids := make([]uint64, 0, len(parts))
+		for _, part := range parts {
+			id := parseUint64(part)
+			if id == 0 {
+				response.BadRequest(c, "图片编号无效")
+				return
+			}
+			ids = append(ids, id)
+		}
+		user, _ := middleware.CurrentUser(c)
+		states, err := deps.Images.VisibleCacheStates(ids, user.ID, user.Role != model.UserRoleUser)
+		if err != nil {
+			response.ServerError(c, "读取同步进度失败")
+			return
+		}
+		response.OK(c, states)
+	})
 	group.GET("/images", func(c *gin.Context) {
 		user, _ := middleware.CurrentUser(c)
 		q := service.ImageQuery{
-			UserID:   user.ID,
-			Tag:      c.Query("tag"),
-			Mime:     c.Query("mime"),
-			Keyword:  c.Query("keyword"),
-			Recycled: c.Query("recycled") == "1",
+			UserID:     user.ID,
+			Tag:        c.Query("tag"),
+			Mime:       c.Query("mime"),
+			Keyword:    c.Query("keyword"),
+			Moderation: c.Query("moderation"),
+			Recycled:   c.Query("recycled") == "1",
 		}
 		if user.Role != model.UserRoleUser && c.Query("scope") == "all" {
 			q.UserID = 0

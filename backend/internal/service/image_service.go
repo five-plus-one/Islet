@@ -20,8 +20,9 @@ var (
 
 // ImageService 图库查询、编辑、回收站、彻底删除。
 type ImageService struct {
-	db       *gorm.DB
-	policies *PolicyService
+	db        *gorm.DB
+	policies  *PolicyService
+	cdnClient func(string, string) cdnProvider
 }
 
 func NewImageService(db *gorm.DB, policies *PolicyService) *ImageService {
@@ -29,15 +30,16 @@ func NewImageService(db *gorm.DB, policies *PolicyService) *ImageService {
 }
 
 type ImageQuery struct {
-	UserID   uint64 // 0=不限（管理员视角）
-	AlbumID  *uint64
-	Tag      string
-	Mime     string
-	Keyword  string
-	Recycled bool
-	Before   *time.Time // 游标分页：早于此时间
-	BeforeID uint64
-	Limit    int
+	UserID     uint64 // 0=不限（管理员视角）
+	AlbumID    *uint64
+	Tag        string
+	Mime       string
+	Keyword    string
+	Moderation string
+	Recycled   bool
+	Before     *time.Time // 游标分页：早于此时间
+	BeforeID   uint64
+	Limit      int
 }
 
 type ImageItem struct {
@@ -54,29 +56,41 @@ type ImageItem struct {
 	Width        int        `json:"width"`
 	Height       int        `json:"height"`
 	Tags         []string   `json:"tags"`
+	Blocked      bool       `json:"blocked"`
+	BlockReason  string     `json:"block_reason"`
+	ModeratedAt  *time.Time `json:"moderated_at,omitempty"`
+	CacheSync    string     `json:"cache_sync"`
 	CreatedAt    time.Time  `json:"created_at"`
 	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
 }
 
 func (s *ImageService) item(i model.Image, username string) ImageItem {
+	base := ""
+	if s.policies != nil && s.policies.base != nil {
+		base, _ = s.policies.distribution(i.PolicyID)
+	}
+	return imageView(i, username, base, s.CDNStatus(i.ID))
+}
+
+func imageView(i model.Image, username, base, syncState string) ImageItem {
 	result := ImageItem{
 		ID: i.ID, UserID: i.UserID, Username: username, PolicyID: i.PolicyID,
 		AlbumID: i.AlbumID, URL: i.URL, OriginalName: i.OriginalName,
 		Mime: i.Mime, Size: i.Size, Width: i.Width, Height: i.Height,
 		Tags: i.Tags, CreatedAt: i.CreatedAt,
+		Blocked: i.Blocked, BlockReason: i.BlockReason, ModeratedAt: i.ModeratedAt,
 	}
-	if i.ThumbURL != nil && *i.ThumbURL != "" {
-		result.ThumbURL = *i.ThumbURL
-		if strings.Contains(i.URL, "/i/"+i.StorageKey) {
-			result.ThumbURL = strings.Replace(i.URL, "/i/"+i.StorageKey, "/t/"+i.StorageKey, 1)
-		}
+	if base != "" {
+		result.URL = base + "/i/" + i.StorageKey
+		result.ThumbURL = base + "/t/" + i.StorageKey
 	} else {
-		result.ThumbURL = i.URL
+		result.ThumbURL = result.URL
 	}
 	if i.DeletedAt.Valid {
 		t := i.DeletedAt.Time
 		result.DeletedAt = &t
 	}
+	result.CacheSync = syncState
 	if result.Tags == nil {
 		result.Tags = []string{}
 	}
@@ -109,6 +123,11 @@ func (s *ImageService) List(q ImageQuery) ([]ImageItem, error) {
 		like := "%" + q.Keyword + "%"
 		tx = tx.Where("original_name LIKE ? OR url LIKE ?", like, like)
 	}
+	if q.Moderation == "blocked" {
+		tx = tx.Where("blocked = ?", true)
+	} else if q.Moderation == "active" {
+		tx = tx.Where("blocked = ?", false)
+	}
 	if q.Before != nil {
 		if q.BeforeID > 0 {
 			tx = tx.Where("(created_at < ? OR (created_at = ? AND id < ?))", *q.Before, *q.Before, q.BeforeID)
@@ -121,9 +140,22 @@ func (s *ImageService) List(q ImageQuery) ([]ImageItem, error) {
 		return nil, err
 	}
 	usernames := s.usernameMap(rows)
+	ids := make([]uint64, 0, len(rows))
+	bases := map[uint64]string{}
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+		if _, ok := bases[row.PolicyID]; !ok {
+			base := ""
+			if s.policies != nil {
+				base, _ = s.policies.distribution(row.PolicyID)
+			}
+			bases[row.PolicyID] = base
+		}
+	}
+	states := s.cacheStates(ids)
 	items := make([]ImageItem, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, s.item(row, usernames[row.UserID]))
+		items = append(items, imageView(row, usernames[row.UserID], bases[row.PolicyID], states[row.ID]))
 	}
 	return items, nil
 }
@@ -174,6 +206,16 @@ func (s *ImageService) ItemView(i model.Image) ImageItem {
 func (s *ImageService) GetByKey(key string) (model.Image, error) {
 	var image model.Image
 	err := s.db.Where("storage_key = ?", key).First(&image).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return image, ErrImageNotFound
+	}
+	return image, err
+}
+
+// GetByLegacyKey resolves original and thumbnail paths published before managed links.
+func (s *ImageService) GetByLegacyKey(key string) (model.Image, error) {
+	var image model.Image
+	err := s.db.Where("storage_key = ? OR thumb_key = ?", key, key).First(&image).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return image, ErrImageNotFound
 	}
@@ -231,14 +273,19 @@ func (s *ImageService) Update(id, userID uint64, isSuper bool, in ImageUpdate) (
 
 // Recycle 软删除（本人或 super_admin）。
 func (s *ImageService) Recycle(id, userID uint64, isSuper bool) error {
-	image, err := s.Get(id)
-	if err != nil {
-		return err
-	}
-	if !isSuper && image.UserID != userID {
-		return ErrImageNotFound
-	}
-	return s.db.Delete(&image).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var image model.Image
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&image, id).Error; err != nil {
+			return ErrImageNotFound
+		}
+		if !isSuper && image.UserID != userID {
+			return ErrImageNotFound
+		}
+		if err := tx.Delete(&image).Error; err != nil {
+			return err
+		}
+		return s.enqueueCDN(tx, image)
+	})
 }
 
 // Restore 回收站恢复（管理员或本人），恢复时校验分组配额。
@@ -270,7 +317,10 @@ func (s *ImageService) Restore(id, userID uint64, isSuper bool, checkQuota func(
 				return err
 			}
 		}
-		return tx.Unscoped().Model(&image).Update("deleted_at", nil).Error
+		if err := tx.Unscoped().Model(&image).Update("deleted_at", nil).Error; err != nil {
+			return err
+		}
+		return s.enqueueCDN(tx, image)
 	})
 }
 
@@ -290,6 +340,9 @@ func (s *ImageService) Purge(ctx context.Context, id, userID uint64, isSuper boo
 		driver, _, err := s.policies.ReadDriver(image.PolicyID)
 		if err != nil {
 			return errors.New("暂时无法连接存储，请检查存储策略后重试")
+		}
+		if err := s.enqueueCDN(tx, image); err != nil {
+			return err
 		}
 		if err := driver.Delete(ctx, image.StorageKey); err != nil {
 			return errors.New("原图删除失败，请稍后重试")

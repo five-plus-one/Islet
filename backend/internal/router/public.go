@@ -1,8 +1,10 @@
 package router
 
 import (
+	_ "embed"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +15,9 @@ import (
 	"islet/backend/internal/service"
 	"islet/backend/internal/storage"
 )
+
+//go:embed policy-notice.svg
+var policyNotice []byte
 
 // registerImageRoutes 图片访问：/i/{key} 原图，/t/{key} 缩略图（缺失回退原图）。
 func registerImageRoutes(engine *gin.Engine, deps *Deps) {
@@ -25,9 +30,30 @@ func registerImageRoutes(engine *gin.Engine, deps *Deps) {
 		engine.GET(path, handler(path == "/t/*key"))
 		engine.HEAD(path, handler(path == "/t/*key"))
 	}
+	legacy := func(c *gin.Context) {
+		key := strings.TrimPrefix(c.Param("key"), "/")
+		c.Header("Cache-Control", "no-store")
+		if !storage.SafeKey(key) || deps.Images == nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		image, err := deps.Images.GetByLegacyKey(key)
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		if image.Blocked {
+			servePolicyNotice(c)
+			return
+		}
+		serveStoredImage(c, deps, image, image.ThumbKey != nil && key == *image.ThumbKey)
+	}
+	engine.GET("/legacy/*key", legacy)
+	engine.HEAD("/legacy/*key", legacy)
 }
 
 func serveImage(c *gin.Context, deps *Deps, rawKey string, thumb bool) {
+	c.Header("Cache-Control", "no-store")
 	key := strings.TrimPrefix(rawKey, "/")
 	if !storage.SafeKey(key) || deps.Images == nil {
 		c.String(http.StatusNotFound, "not found")
@@ -38,7 +64,15 @@ func serveImage(c *gin.Context, deps *Deps, rawKey string, thumb bool) {
 		c.String(http.StatusNotFound, "not found")
 		return
 	}
-	targetKey := key
+	if image.Blocked {
+		servePolicyNotice(c)
+		return
+	}
+	serveStoredImage(c, deps, image, thumb)
+}
+
+func serveStoredImage(c *gin.Context, deps *Deps, image model.Image, thumb bool) {
+	targetKey := image.StorageKey
 	if thumb {
 		if image.ThumbKey == nil || *image.ThumbKey == "" {
 			thumb = false // 回退原图
@@ -52,24 +86,32 @@ func serveImage(c *gin.Context, deps *Deps, rawKey string, thumb bool) {
 		return
 	}
 
+	cacheable := !strings.HasPrefix(c.FullPath(), "/api/admin/") && deps.Images.CDNCacheEnabled(image.PolicyID)
+	cacheHeaders := func() {
+		if cacheable {
+			c.Header("Cache-Control", "public, max-age=0, s-maxage=2592000, must-revalidate")
+		}
+	}
 	etag := etagOf(targetKey)
+	if image.ModeratedAt != nil {
+		etag = strings.TrimSuffix(etag, `"`) + "-" + strconv.FormatInt(image.ModeratedAt.UnixMicro(), 16) + `"`
+	}
 	c.Header("ETag", etag)
-	c.Header("Cache-Control", "public, max-age=31536000, immutable")
 	if match := c.GetHeader("If-None-Match"); match != "" && strings.Contains(match, etag) {
+		cacheHeaders()
 		c.Status(http.StatusNotModified)
 		return
 	}
 
 	switch driver.Access() {
-	case storage.AccessRedirect:
-		c.Redirect(http.StatusFound, driver.RedirectURL(targetKey))
-	case storage.AccessLocal, storage.AccessProxy:
+	case storage.AccessLocal, storage.AccessProxy, storage.AccessRedirect:
 		content, size, err := driver.Read(c.Request.Context(), targetKey)
 		if err != nil {
 			c.String(http.StatusNotFound, "not found")
 			return
 		}
 		defer content.Close()
+		cacheHeaders()
 		contentType := image.Mime
 		if thumb {
 			contentType = thumbContentType(image, targetKey)

@@ -7,8 +7,9 @@
 | 方法 | 路径 | 鉴权 | 说明 |
 |------|------|------|------|
 | GET | /api/v1/health | - | 健康检查（含安装状态标记） |
-| GET/HEAD | /i/{key...} | - | 原图；local 流式 / s3 direct 302 / s3 proxy 转发；ETag+immutable 缓存 |
+| GET/HEAD | /i/{key...} | - | 校验审核状态后返回原图；启用缓存同步时允许 CDN 缓存，受限时返回禁止缓存的策略提示图 |
 | GET/HEAD | /t/{key...} | - | 缩略图；缺失回退原图 |
+| GET/HEAD | /legacy/{key...} | - | 兼容已有原图和缩略图文件路径，校验审核状态及回收状态 |
 | POST | /api/v1/upload | Token/JWT/会话 | multipart `files`；PicGo 兼容响应 `{"success":true,"result":[urls]}` |
 
 ## 管理端口（:8081）
@@ -36,7 +37,11 @@
 |------|------|------|
 | GET | /api/v1/me | 资料 + 分组 + 配额用量 |
 | GET/POST | /api/v1/me/tokens，PUT/DELETE /:id | API Token 管理 |
-| GET | /api/v1/images | 本人图库（admin 可加 user_id 看全部）：分页、album_id/tag/mime/关键词/时间筛选、排序 |
+| GET | /api/v1/client-configs/piclist | PicList 高级自定义上传模板；需要交互式登录，返回内容不含真实上传密钥 |
+| GET | /api/v1/images | 默认本人图库；管理员显式 scope=all 查询全站，并可用 user_id 筛选上传者；支持分页、访问状态、相册、标签、类型、关键词与时间筛选 |
+| GET | /api/v1/images/cache-sync?ids=1,2 | 最多 100 张可见图片的缓存同步状态；普通用户只返回本人图片，管理员可查全站 |
+| PATCH | /api/admin/images/:id/moderation | 管理员禁止或恢复访问；blocked 必填，禁止时 reason 必填（最多 500 字）；审核与审计同事务 |
+| GET/HEAD | /api/admin/images/:id/preview | 需要管理员交互会话的原图复核，thumb=1 获取缩略图，响应禁止缓存 |
 | PATCH/DELETE | /api/v1/images/:id | 改名/标签/相册；软删除进回收站 |
 | POST | /api/v1/images/:id/restore | 从回收站恢复（校验配额） |
 | DELETE | /api/v1/images/:id/purge | 彻底删除（本人或 admin） |

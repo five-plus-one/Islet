@@ -7,6 +7,17 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: islet-ci-database
+          MYSQL_DATABASE: islet_cdn_jobs_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pislet-ci-database"
+          --health-interval=5s --health-timeout=5s --health-retries=20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -20,6 +31,8 @@ jobs:
           cache-dependency-path: frontend/admin/package-lock.json
       - run: go build ./... && go test ./...
         working-directory: backend
+        env:
+          ISLET_CDN_TEST_DSN: root:islet-ci-database@tcp(127.0.0.1:3306)/islet_cdn_jobs_test?charset=utf8mb4&parseTime=true&loc=Local
       - run: npm ci && npm run type-check && npm run build
         working-directory: frontend/admin
       - run: docker compose --env-file deploy/.env.example -f deploy/docker-compose.yml config --quiet

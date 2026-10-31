@@ -15,11 +15,17 @@ import (
 type Worker struct {
 	interval time.Duration
 	run      func(ctx context.Context)
+	cdn      func(ctx context.Context)
 }
 
 func New(db *gorm.DB, settings *service.SettingsService, images *service.ImageService, logger *slog.Logger) *Worker {
 	return &Worker{
 		interval: time.Hour,
+		cdn: func(ctx context.Context) {
+			if err := images.SyncCDN(ctx); err != nil && ctx.Err() == nil {
+				logger.Warn("图片访问状态同步暂未完成")
+			}
+		},
 		run: func(ctx context.Context) {
 			// 会话清理
 			if err := db.Where("expires_at < ?", time.Now().UTC()).Delete(&model.AuthSession{}).Error; err != nil {
@@ -51,6 +57,18 @@ func (w *Worker) Start() (stop func()) {
 				return
 			case <-ticker.C:
 				w.run(ctx)
+			}
+		}
+	}()
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			w.cdn(ctx)
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
 			}
 		}
 	}()

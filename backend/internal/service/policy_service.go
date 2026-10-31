@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 
 	"gorm.io/gorm"
@@ -45,27 +46,29 @@ type PolicyView struct {
 	Bucket           string `json:"bucket,omitempty"`
 	Prefix           string `json:"prefix,omitempty"`
 	CDN              string `json:"cdn,omitempty"`
+	CDNRefresh       bool   `json:"cdn_refresh"`
 	AccessKey        string `json:"access_key,omitempty"`
 	PathStyle        bool   `json:"path_style,omitempty"`
 	SecretConfigured bool   `json:"secret_configured"`
 }
 
 type PolicyInput struct {
-	ID        uint64 `json:"id"`
-	Name      string `json:"name"`
-	Driver    string `json:"driver"`
-	URLMode   string `json:"url_mode"`
-	Naming    string `json:"naming"`
-	IsDefault bool   `json:"is_default"`
-	Status    string `json:"status"`
-	Endpoint  string `json:"endpoint"`
-	Region    string `json:"region"`
-	Bucket    string `json:"bucket"`
-	Prefix    string `json:"prefix"`
-	CDN       string `json:"cdn"`
-	AccessKey string `json:"access_key"`
-	SecretKey string `json:"secret_key"`
-	PathStyle bool   `json:"path_style"`
+	ID         uint64 `json:"id"`
+	Name       string `json:"name"`
+	Driver     string `json:"driver"`
+	URLMode    string `json:"url_mode"`
+	Naming     string `json:"naming"`
+	IsDefault  bool   `json:"is_default"`
+	Status     string `json:"status"`
+	Endpoint   string `json:"endpoint"`
+	Region     string `json:"region"`
+	Bucket     string `json:"bucket"`
+	Prefix     string `json:"prefix"`
+	CDN        string `json:"cdn"`
+	CDNRefresh bool   `json:"cdn_refresh"`
+	AccessKey  string `json:"access_key"`
+	SecretKey  string `json:"secret_key"`
+	PathStyle  bool   `json:"path_style"`
 }
 
 func (s *PolicyService) decryptConfig(policy model.StoragePolicy) (S3Payload, error) {
@@ -83,6 +86,7 @@ func (s *PolicyService) decryptConfig(policy model.StoragePolicy) (S3Payload, er
 // S3Payload 策略密文中的 S3 配置；local 策略存空对象。
 type S3Payload struct {
 	storage.S3Config
+	CDNRefresh bool `json:"cdn_refresh"`
 }
 
 func (s *PolicyService) List() ([]PolicyView, error) {
@@ -118,6 +122,7 @@ func (s *PolicyService) view(p model.StoragePolicy) (PolicyView, error) {
 		result.Bucket = payload.Bucket
 		result.Prefix = payload.Prefix
 		result.CDN = payload.CDN
+		result.CDNRefresh = payload.CDNRefresh
 		result.AccessKey = payload.AccessKey
 		result.PathStyle = payload.PathStyle
 		result.SecretConfigured = payload.SecretKey != ""
@@ -126,7 +131,13 @@ func (s *PolicyService) view(p model.StoragePolicy) (PolicyView, error) {
 }
 
 func (s *PolicyService) sealInput(in PolicyInput) (string, error) {
-	payload := S3Payload{S3Config: storage.S3Config{
+	if in.CDNRefresh {
+		u, err := url.Parse(strings.TrimSpace(in.CDN))
+		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || u.Port() != "" {
+			return "", errors.New("图片加速地址须为完整 HTTPS 域名，例如 https://img.example.com")
+		}
+	}
+	payload := S3Payload{CDNRefresh: in.CDNRefresh, S3Config: storage.S3Config{
 		Endpoint: strings.TrimSpace(in.Endpoint), Region: strings.TrimSpace(in.Region),
 		Bucket: strings.TrimSpace(in.Bucket), Prefix: strings.TrimSpace(in.Prefix),
 		CDN: strings.TrimSpace(in.CDN), AccessKey: strings.TrimSpace(in.AccessKey),
@@ -234,6 +245,9 @@ func (s *PolicyService) Update(id uint64, in PolicyInput) (PolicyView, error) {
 			if strings.TrimSpace(in.Endpoint) != old.Endpoint || strings.TrimSpace(in.Bucket) != old.Bucket || strings.TrimSpace(in.Prefix) != old.Prefix {
 				return PolicyView{}, errors.New("已有图片使用此存储位置，请创建新的存储策略")
 			}
+			if old.CDNRefresh && (!in.CDNRefresh || strings.TrimRight(strings.TrimSpace(in.CDN), "/") != strings.TrimRight(old.CDN, "/")) {
+				return PolicyView{}, errors.New("此加速地址仍有图片使用，请保留缓存同步配置")
+			}
 		}
 	}
 	if driver == model.PolicyDriverS3 {
@@ -282,6 +296,12 @@ func (s *PolicyService) Delete(id uint64) error {
 	}
 	if count > 0 {
 		return ErrPolicyInUse
+	}
+	if err := s.db.Model(&model.CDNCacheJob{}).Where("policy_id = ? AND status <> ?", id, "complete").Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return errors.New("图片访问状态正在同步，请完成后再删除策略")
 	}
 	return s.db.Delete(&model.StoragePolicy{}, id).Error
 }

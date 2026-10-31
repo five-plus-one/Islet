@@ -86,11 +86,11 @@ type UserGroup struct {
 	ID             uint64    `gorm:"primaryKey;autoIncrement"`
 	Name           string    `gorm:"size:64;not null;uniqueIndex:uk_group_name"`
 	Description    string    `gorm:"size:255"`
-	QuotaBytes     uint64    `gorm:"not null;default:0"` // 0=不限
-	MaxFileBytes   uint64    `gorm:"not null;default:0"` // 0=不限
-	AllowedMimes   []string  `gorm:"serializer:json;type:json"`      // 空=全部 image/*
-	PolicyIDs      []uint64  `gorm:"serializer:json;type:json"`      // 空=全部策略
-	UploadsPerHour int       `gorm:"not null;default:0"`             // 0=不限
+	QuotaBytes     uint64    `gorm:"not null;default:0"`        // 0=不限
+	MaxFileBytes   uint64    `gorm:"not null;default:0"`        // 0=不限
+	AllowedMimes   []string  `gorm:"serializer:json;type:json"` // 空=全部 image/*
+	PolicyIDs      []uint64  `gorm:"serializer:json;type:json"` // 空=全部策略
+	UploadsPerHour int       `gorm:"not null;default:0"`        // 0=不限
 	BuiltIn        bool      `gorm:"not null;default:false"`
 	Status         string    `gorm:"type:enum('active','disabled');not null;default:active"`
 	CreatedAt      time.Time `gorm:"not null"`
@@ -116,21 +116,25 @@ type StoragePolicy struct {
 func (StoragePolicy) TableName() string { return "storage_policies" }
 
 type Image struct {
-	ID           uint64         `gorm:"primaryKey;autoIncrement"`
-	UserID       uint64         `gorm:"not null;index:idx_image_user"`
-	PolicyID     uint64         `gorm:"not null"`
-	AlbumID      *uint64        `gorm:"index:idx_image_album"`
-	StorageKey   string         `gorm:"size:512;not null;uniqueIndex:uk_storage_key"`
-	URL          string         `gorm:"size:1024;not null"`
-	ThumbKey     *string        `gorm:"size:512"`
-	ThumbURL     *string        `gorm:"size:1024"`
-	OriginalName string         `gorm:"size:255;not null"`
-	Mime         string         `gorm:"size:128;not null;index:idx_image_mime"`
-	Size         uint64         `gorm:"not null"`
-	Width        int            `gorm:"not null;default:0"`
-	Height       int            `gorm:"not null;default:0"`
-	SHA256       string         `gorm:"column:sha256;size:64;not null;index:idx_image_sha"`
-	Tags         []string       `gorm:"serializer:json;type:json"`
+	ID           uint64   `gorm:"primaryKey;autoIncrement"`
+	UserID       uint64   `gorm:"not null;index:idx_image_user"`
+	PolicyID     uint64   `gorm:"not null"`
+	AlbumID      *uint64  `gorm:"index:idx_image_album"`
+	StorageKey   string   `gorm:"size:512;not null;uniqueIndex:uk_storage_key"`
+	URL          string   `gorm:"size:1024;not null"`
+	ThumbKey     *string  `gorm:"size:512;index:idx_image_thumb"`
+	ThumbURL     *string  `gorm:"size:1024"`
+	OriginalName string   `gorm:"size:255;not null"`
+	Mime         string   `gorm:"size:128;not null;index:idx_image_mime"`
+	Size         uint64   `gorm:"not null"`
+	Width        int      `gorm:"not null;default:0"`
+	Height       int      `gorm:"not null;default:0"`
+	SHA256       string   `gorm:"column:sha256;size:64;not null;index:idx_image_sha"`
+	Tags         []string `gorm:"serializer:json;type:json"`
+	Blocked      bool     `gorm:"not null;default:false;index:idx_image_blocked"`
+	BlockReason  string   `gorm:"size:2000;not null;default:''"`
+	ModeratedBy  *uint64
+	ModeratedAt  *time.Time
 	CreatedAt    time.Time      `gorm:"not null;index:idx_image_created"`
 	UpdatedAt    time.Time      `gorm:"not null"`
 	DeletedAt    gorm.DeletedAt `gorm:"index:idx_image_deleted"`
@@ -146,11 +150,29 @@ type Album struct {
 	DeletedAt   gorm.DeletedAt `gorm:"index"`
 }
 
+// CDNCacheJob survives image deletion and process restarts.
+type CDNCacheJob struct {
+	ID            uint64   `gorm:"primaryKey;autoIncrement"`
+	ImageID       uint64   `gorm:"not null;index"`
+	PolicyID      uint64   `gorm:"not null"`
+	URLs          []string `gorm:"serializer:json;type:json;not null"`
+	TaskIDs       string   `gorm:"size:2048;not null;default:''"`
+	SubmittedAt   *time.Time
+	Status        string    `gorm:"size:16;not null;default:pending;index:idx_cdn_due,priority:1"`
+	Attempts      int       `gorm:"not null;default:0"`
+	NextAttemptAt time.Time `gorm:"not null;index:idx_cdn_due,priority:2"`
+	LastError     string    `gorm:"size:128;not null;default:''"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+func (CDNCacheJob) TableName() string { return "cdn_cache_jobs" }
+
 type APIToken struct {
-	ID         uint64    `gorm:"primaryKey;autoIncrement"`
-	UserID     uint64    `gorm:"not null;index:idx_token_user"`
-	Name       string    `gorm:"size:64;not null"`
-	TokenHash  string    `gorm:"size:64;not null;uniqueIndex:uk_api_token_hash"`
+	ID         uint64 `gorm:"primaryKey;autoIncrement"`
+	UserID     uint64 `gorm:"not null;index:idx_token_user"`
+	Name       string `gorm:"size:64;not null"`
+	TokenHash  string `gorm:"size:64;not null;uniqueIndex:uk_api_token_hash"`
 	ExpiresAt  *time.Time
 	LastUsedAt *time.Time
 	Status     string    `gorm:"type:enum('active','disabled');not null;default:active"`
@@ -171,6 +193,6 @@ type SystemConfig struct {
 func AllModels() []any {
 	return []any{
 		&User{}, &AuthSession{}, &InstallationState{}, &AuditLog{},
-		&UserGroup{}, &StoragePolicy{}, &Image{}, &Album{}, &APIToken{}, &SystemConfig{},
+		&UserGroup{}, &StoragePolicy{}, &Image{}, &Album{}, &APIToken{}, &SystemConfig{}, &CDNCacheJob{},
 	}
 }

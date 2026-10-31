@@ -68,13 +68,17 @@ s3 config 明文结构：endpoint、region、bucket、prefix、cdn、access_key�
 | album_id | BIGINT NULL INDEX | |
 | storage_key | VARCHAR(512) UNIQUE | 策略内对象 key |
 | url | VARCHAR(1024) | 最终访问 URL（上传时固化） |
-| thumb_key | VARCHAR(512) NULL | 缩略图 key |
+| thumb_key | VARCHAR(512) NULL INDEX | 缩略图 key，用于既有缩略图链接查找 |
 | original_name | VARCHAR(255) | |
 | mime | VARCHAR(128) INDEX | |
 | size | BIGINT | 字节 |
 | width / height | INT | |
 | sha256 | CHAR(64) INDEX | 同用户去重：(user_id, sha256) |
 | tags | JSON | 字符串数组 |
+| blocked | BOOL NOT NULL DEFAULT false INDEX | 管理员禁止公开访问 |
+| block_reason | VARCHAR(2000) NOT NULL DEFAULT '' | 原因，应用限制 500 字 |
+| moderated_by | BIGINT NULL | 最近审核人 |
+| moderated_at | DATETIME NULL | 最近审核时间 |
 | created_at / updated_at / deleted_at | | 软删除=回收站 |
 
 ## albums
@@ -109,3 +113,6 @@ key_name UNIQUE / value TEXT / description / updated_at。已用键：
 ## installation_state / audit_logs
 
 installation_state：单行，installed、owner_user_id、schema_version、installed_at。审计：user_id、action、target_type、target_id、detail JSON、ip、created_at（INDEX created）。
+## CDN 缓存同步任务
+
+`cdn_cache_jobs` 持久保存图片访问变更对应的刷新任务：image_id、policy_id、urls(JSON)、task_ids、submitted_at、status(pending/submitted/complete)、attempts、next_attempt_at、last_error、created_at、updated_at。按 status/next_attempt_at 索引领取；处理中设置短期租约。任务与图片变更同事务提交，不设级联删除；图片彻底删除后仍刷新已发布链接。失败自动退避，完成记录保留。

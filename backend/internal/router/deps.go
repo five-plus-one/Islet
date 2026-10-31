@@ -67,6 +67,7 @@ func BuildAdminEngine(deps *Deps) *gin.Engine {
 	user := api.Group("")
 	user.Use(deps.Authenticator.Middleware(), middleware.RequireInteractive())
 	registerMeRoutes(user, deps)
+	registerClientConfigRoutes(user, deps)
 	registerImageManageRoutes(user, deps)
 	registerAlbumRoutes(user, deps)
 
@@ -75,6 +76,7 @@ func BuildAdminEngine(deps *Deps) *gin.Engine {
 	registerPolicyRoutes(admin, deps)
 	registerGroupRoutes(admin, deps)
 	registerUserRoutes(admin, deps)
+	registerModerationRoutes(admin, deps)
 	registerStatsRoutes(admin, deps)
 	registerSettingsRoutes(admin, deps)
 	registerSystemRoutes(admin, deps)

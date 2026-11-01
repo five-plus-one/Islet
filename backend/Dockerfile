@@ -23,6 +23,7 @@ ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/islet ./cmd/server
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/importlsky ./cmd/importlsky
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/orientation ./cmd/orientation
 
 FROM alpine:3.24.3
 
@@ -43,6 +44,7 @@ USER islet
 WORKDIR /app
 COPY --from=builder /out/islet /app/islet
 COPY --from=builder /out/importlsky /app/importlsky
+COPY --from=builder /out/orientation /app/orientation
 
 EXPOSE 8080 8081
 VOLUME ["/data"]

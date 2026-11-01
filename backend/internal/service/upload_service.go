@@ -196,7 +196,7 @@ func (s *UploadService) upload(ctx context.Context, in UploadInput) (UploadResul
 			if int64(cfg.Width)*int64(cfg.Height) > 40_000_000 {
 				return UploadResult{}, errors.New("图片像素过大，请缩小至 4000 万像素以内")
 			}
-			width, height = cfg.Width, cfg.Height
+			width, height = orientedSize(cfg.Width, cfg.Height, imageOrientation(data))
 		}
 		if thumb, ok := buildThumb(data); ok {
 			tk := key + ".thumb"
@@ -364,12 +364,20 @@ func (s *UploadService) UsedBytes(userID uint64) (uint64, error) { return s.used
 func BuildThumbnail(data []byte) ([]byte, bool) { return buildThumb(data) }
 
 func buildThumb(data []byte) ([]byte, bool) {
+	if len(data) > thumbDecodeMax {
+		return nil, false
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > 40_000_000 {
+		return nil, false
+	}
 	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, false
 	}
 	bounds := src.Bounds()
-	w, h := bounds.Dx(), bounds.Dy()
+	orientation := imageOrientation(data)
+	w, h := orientedSize(bounds.Dx(), bounds.Dy(), orientation)
 	if w <= 0 || h <= 0 {
 		return nil, false
 	}
@@ -395,10 +403,9 @@ func buildThumb(data []byte) ([]byte, bool) {
 	// 最近邻采样足够缩略图场景（避免引入外部长边依赖；x/image draw 亦可，但简单实现更可控）
 	dst := image.NewRGBA(image.Rect(0, 0, tw, th))
 	for y := 0; y < th; y++ {
-		sy := bounds.Min.Y + y*bounds.Dy()/th
 		for x := 0; x < tw; x++ {
-			sx := bounds.Min.X + x*bounds.Dx()/tw
-			dst.Set(x, y, src.At(sx, sy))
+			sx, sy := orientedSource(x*w/tw, y*h/th, bounds.Dx(), bounds.Dy(), orientation)
+			dst.Set(x, y, src.At(bounds.Min.X+sx, bounds.Min.Y+sy))
 		}
 	}
 

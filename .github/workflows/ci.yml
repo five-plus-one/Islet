@@ -33,6 +33,6 @@ jobs:
         working-directory: backend
         env:
           ISLET_CDN_TEST_DSN: root:islet-ci-database@tcp(127.0.0.1:3306)/islet_cdn_jobs_test?charset=utf8mb4&parseTime=true&loc=Local
-      - run: npm ci && npm run type-check && npm run build
+      - run: npm ci && npm test && npm run type-check && npm run build
         working-directory: frontend/admin
       - run: docker compose --env-file deploy/.env.example -f deploy/docker-compose.yml config --quiet

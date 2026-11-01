@@ -248,6 +248,25 @@ test.describe.serial("Account and storage API acceptance", () => {
       policy_ids: [1],
       status: "active",
     });
+    const existingName = (
+      await call(owner, "/api/admin/user-groups")
+    ).items.find((item: any) => item.id === 2).name;
+    for (const [method, path] of [
+      ["POST", "/api/admin/user-groups"],
+      ["PATCH", `/api/admin/user-groups/${group.ID}`],
+    ]) {
+      const duplicate = await owner.fetch(path, {
+        method,
+        data: { name: existingName },
+      });
+      expect(duplicate.status()).toBe(409);
+      expect((await duplicate.json()).message).toBe("分组名称已存在");
+    }
+    const retainedGroup = (
+      await call(owner, "/api/admin/user-groups")
+    ).items.find((item: any) => item.id === group.ID);
+    expect(retainedGroup.policy_ids).toEqual([1]);
+    expect(retainedGroup.allowed_mimes).toEqual(["image/png"]);
     const user = await call(owner, "/api/admin/users", "POST", {
       username: "member-" + suffix,
       password: credentials.password,

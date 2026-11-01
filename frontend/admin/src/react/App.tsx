@@ -56,6 +56,7 @@ import {
 import { uploads } from "./uploads";
 import { Gallery, UploadPage, Albums, Tokens, Profile } from "./library";
 import { AdminPage, Setup } from "./management";
+import { GroupEditor, PolicyEditor } from "./admin-editors";
 const navigation = [
   ["/images", "图片库", Images],
   ["/upload", "上传图片", Upload],
@@ -372,6 +373,10 @@ function Workspace({ theme }: { theme: React.ReactNode }) {
       </main>
     );
   const admin = me.user.role !== "user";
+  const activePath =
+    navigation.find(
+      ([path]) => loc.pathname === path || loc.pathname.startsWith(path + "/"),
+    )?.[0] || loc.pathname;
   const items = navigation
     .filter((_, i) => admin || i < 6)
     .map(([id, label, Icon]) => ({ id, label, icon: <Icon size={19} /> }));
@@ -386,7 +391,7 @@ function Workspace({ theme }: { theme: React.ReactNode }) {
         <ProductNavigation
           variant="sidebar"
           items={items.slice(0, 6)}
-          value={loc.pathname}
+          value={activePath}
           onChange={(path) => {
             navigate(path);
             setMobile(false);
@@ -399,7 +404,7 @@ function Workspace({ theme }: { theme: React.ReactNode }) {
               variant="sidebar"
               label="管理导航"
               items={items.slice(6)}
-              value={loc.pathname}
+              value={activePath}
               onChange={(path) => {
                 navigate(path);
                 setMobile(false);
@@ -438,7 +443,7 @@ function Workspace({ theme }: { theme: React.ReactNode }) {
               <Menu size={20} />
             </Button>
             <span>
-              {items.find((x) => x.id === loc.pathname)?.label || "图片工作台"}
+              {items.find((x) => x.id === activePath)?.label || "图片工作台"}
             </span>
             <div>
               {theme}
@@ -481,6 +486,38 @@ function Workspace({ theme }: { theme: React.ReactNode }) {
           <Route path="/albums" element={<Albums />} />
           <Route path="/tokens" element={<Tokens />} />
           <Route path="/profile" element={<Profile />} />
+          <Route
+            path="/groups/new"
+            element={
+              admin ? (
+                <GroupEditor key="new-group" />
+              ) : (
+                <Navigate to="/images" replace />
+              )
+            }
+          />
+          <Route
+            path="/groups/:id/edit"
+            element={
+              admin ? <GroupEditor /> : <Navigate to="/images" replace />
+            }
+          />
+          <Route
+            path="/policies/new"
+            element={
+              admin ? (
+                <PolicyEditor key="new-policy" />
+              ) : (
+                <Navigate to="/images" replace />
+              )
+            }
+          />
+          <Route
+            path="/policies/:id/edit"
+            element={
+              admin ? <PolicyEditor /> : <Navigate to="/images" replace />
+            }
+          />
           <Route
             path="/moderation"
             element={

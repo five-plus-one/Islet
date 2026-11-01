@@ -8,13 +8,7 @@ import {
   EmptyState,
   Tabs,
 } from "@fiveplusone/ui";
-import {
-  api,
-  type GroupView,
-  type PolicyInput,
-  type UserView,
-  beginOIDCLogin,
-} from "../api";
+import { api, type GroupView, type UserView, beginOIDCLogin } from "../api";
 import { errorText, humanBytes, groupLabel, dateLabel } from "../utils";
 import {
   Heading,
@@ -621,42 +615,15 @@ function Users() {
 }
 function Groups() {
   const data = useLoad(api.groups),
-    policies = useLoad(api.policies),
-    { notify } = useSession();
-  const [edit, setEdit] = useState<Partial<GroupView> | null>(null),
-    [remove, setRemove] = useState<GroupView>(),
-    [error, setError] = useState(""),
-    [busy, setBusy] = useState(false);
-  const update = (key: string, v: unknown) =>
-    setEdit((x) => ({ ...x, [key]: v }));
+    navigate = useNavigate();
+  const [remove, setRemove] = useState<GroupView>();
   return (
     <>
       <Heading
         title="用户分组"
         description="为每位成员设置容量、上传限制和可用存储。"
         actions={
-          <Button
-            onClick={() => {
-              setError("");
-              setEdit({
-                name: "",
-                description: "",
-                quota_bytes: 1073741824,
-                max_file_bytes: 10485760,
-                allowed_mimes: [
-                  "image/jpeg",
-                  "image/png",
-                  "image/webp",
-                  "image/gif",
-                ],
-                policy_ids: [],
-                uploads_per_hour: 100,
-                status: "active",
-              });
-            }}
-          >
-            新建分组
-          </Button>
+          <Button onClick={() => navigate("/groups/new")}>新建分组</Button>
         }
       />
       <Failure error={data.error} retry={data.reload} />
@@ -664,27 +631,35 @@ function Groups() {
         <Loading />
       ) : (
         <div className="islet-card-grid">
-          {data.data?.items.map((x) => (
-            <Card key={x.id}>
-              <h2>{groupLabel(x.name)}</h2>
-              <p>{x.description}</p>
+          {data.data?.items.map((group) => (
+            <Card key={group.id}>
+              <h2>{groupLabel(group.name)}</h2>
+              <p>{group.description}</p>
               <p>
                 每位成员容量：
-                {x.quota_bytes ? humanBytes(x.quota_bytes) : "不限"}
+                {group.quota_bytes ? humanBytes(group.quota_bytes) : "不限"}
               </p>
-              <p>单张上限：{humanBytes(x.max_file_bytes)}</p>
+              <p>
+                单张上限：
+                {group.max_file_bytes
+                  ? humanBytes(group.max_file_bytes)
+                  : "不限"}
+              </p>
+              <p className="fp-muted">
+                {group.status === "active" ? "启用" : "停用"} ·{" "}
+                {group.policy_ids.length
+                  ? `${group.policy_ids.length} 个指定存储`
+                  : "全部可用存储"}
+              </p>
               <div className="islet-row">
                 <Button
                   variant="secondary"
-                  onClick={() => {
-                    setError("");
-                    setEdit({ ...x, policy_ids: [...x.policy_ids] });
-                  }}
+                  onClick={() => navigate(`/groups/${group.id}/edit`)}
                 >
                   编辑
                 </Button>
-                {!x.built_in && (
-                  <Button variant="ghost" onClick={() => setRemove(x)}>
+                {!group.built_in && (
+                  <Button variant="ghost" onClick={() => setRemove(group)}>
                     删除分组
                   </Button>
                 )}
@@ -693,110 +668,10 @@ function Groups() {
           ))}
         </div>
       )}
-      <Dialog
-        open={!!edit}
-        title={edit?.id ? "编辑分组" : "新建分组"}
-        onClose={() => !busy && setEdit(null)}
-        footer={
-          <Button
-            loading={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await api.saveGroup({ ...edit, name: edit?.name || "" });
-                setEdit(null);
-                data.reload();
-                notify("分组已保存");
-              } catch (e) {
-                setError(errorText(e));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            保存分组
-          </Button>
-        }
-      >
-        {edit && (
-          <div className="islet-form">
-            <TextField
-              label="分组名称"
-              value={edit.name || ""}
-              onChange={(v) => update("name", v)}
-            />
-            <TextField
-              label="描述"
-              value={edit.description || ""}
-              onChange={(v) => update("description", v)}
-            />
-            <TextField
-              label="每位成员容量（MB，0 为不限）"
-              type="number"
-              value={(edit.quota_bytes || 0) / 1048576}
-              onChange={(v) => update("quota_bytes", Number(v) * 1048576)}
-            />
-            <TextField
-              label="单张上限（MB）"
-              type="number"
-              value={(edit.max_file_bytes || 0) / 1048576}
-              onChange={(v) => update("max_file_bytes", Number(v) * 1048576)}
-            />
-            <TextField
-              label="每小时上传数量"
-              type="number"
-              value={edit.uploads_per_hour || 0}
-              onChange={(v) => update("uploads_per_hour", Number(v))}
-            />
-            <TextField
-              label="允许的图片格式"
-              value={(edit.allowed_mimes || []).join(", ")}
-              onChange={(v) =>
-                update(
-                  "allowed_mimes",
-                  v
-                    .split(",")
-                    .map((x) => x.trim())
-                    .filter(Boolean),
-                )
-              }
-              hint="填写 MIME 类型，多个用逗号分隔"
-            />
-            <fieldset>
-              <legend>可用存储</legend>
-              {policies.data?.items.map((x) => (
-                <Checkbox
-                  key={x.id}
-                  label={x.name}
-                  checked={edit.policy_ids?.includes(x.id) || false}
-                  onChange={(e) =>
-                    update(
-                      "policy_ids",
-                      e.target.checked
-                        ? [...(edit.policy_ids || []), x.id]
-                        : (edit.policy_ids || []).filter((id) => id !== x.id),
-                    )
-                  }
-                />
-              ))}
-            </fieldset>
-            <Choice
-              label="状态"
-              value={edit.status || "active"}
-              onChange={(v) => update("status", v)}
-              options={[
-                { value: "active", label: "启用" },
-                { value: "disabled", label: "停用" },
-              ]}
-            />
-            <Failure error={error} />
-          </div>
-        )}
-      </Dialog>
       {remove && (
         <Confirm
           title="删除分组"
-          description={`删除「${groupLabel(remove.name)}」，已有成员的分组需要先转移成员。`}
+          description={`删除「${groupLabel(remove.name)}」前，请先转移已有成员。`}
           onClose={() => setRemove(undefined)}
           onConfirm={async () => {
             await api.deleteGroup(remove.id);
@@ -809,44 +684,18 @@ function Groups() {
 }
 function Policies() {
   const data = useLoad(api.policies),
+    navigate = useNavigate(),
     { notify } = useSession();
-  const [edit, setEdit] = useState<PolicyInput | null>(null),
-    [remove, setRemove] = useState<number>(),
+  const [remove, setRemove] = useState<number>(),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
-  const blank: PolicyInput = {
-    name: "",
-    driver: "local",
-    url_mode: "proxy",
-    naming: "date",
-    is_default: false,
-    status: "active",
-    endpoint: "",
-    region: "",
-    bucket: "",
-    prefix: "",
-    cdn: "",
-    cdn_refresh: false,
-    access_key: "",
-    secret_key: "",
-    path_style: true,
-  };
-  const update = (key: string, v: unknown) =>
-    setEdit((x) => ({ ...x!, [key]: v }));
   return (
     <>
       <Heading
         title="存储策略"
         description="连接本地磁盘或对象存储，为图片选择合适的位置。"
         actions={
-          <Button
-            onClick={() => {
-              setError("");
-              setEdit({ ...blank });
-            }}
-          >
-            新建策略
-          </Button>
+          <Button onClick={() => navigate("/policies/new")}>新建策略</Button>
         }
       />
       <Failure error={data.error} retry={data.reload} />
@@ -855,23 +704,20 @@ function Policies() {
         <Loading />
       ) : (
         <div className="islet-card-grid">
-          {data.data?.items.map((x) => (
-            <Card key={x.id}>
+          {data.data?.items.map((policy) => (
+            <Card key={policy.id}>
               <h2>
-                {x.name}
-                {x.is_default ? " · 默认" : ""}
+                {policy.name}
+                {policy.is_default ? " · 默认" : ""}
               </h2>
               <p>
-                {x.driver === "local" ? "本地磁盘" : "对象存储"} ·{" "}
-                {x.status === "active" ? "启用" : "停用"}
+                {policy.driver === "local" ? "本地磁盘" : "对象存储"} ·{" "}
+                {policy.status === "active" ? "启用" : "停用"}
               </p>
               <div className="islet-row">
                 <Button
                   variant="secondary"
-                  onClick={() => {
-                    setError("");
-                    setEdit({ ...blank, ...x, secret_key: "" });
-                  }}
+                  onClick={() => navigate(`/policies/${policy.id}/edit`)}
                 >
                   编辑
                 </Button>
@@ -880,8 +726,9 @@ function Policies() {
                   disabled={busy}
                   onClick={async () => {
                     setBusy(true);
+                    setError("");
                     try {
-                      await api.testPolicyById(x.id);
+                      await api.testPolicyById(policy.id);
                       notify("存储连接正常");
                     } catch (e) {
                       setError(errorText(e));
@@ -892,7 +739,7 @@ function Policies() {
                 >
                   测试连接
                 </Button>
-                <Button variant="ghost" onClick={() => setRemove(x.id)}>
+                <Button variant="ghost" onClick={() => setRemove(policy.id)}>
                   删除
                 </Button>
               </div>
@@ -900,113 +747,6 @@ function Policies() {
           ))}
         </div>
       )}
-      <Dialog
-        open={!!edit}
-        title={edit?.id ? "编辑存储策略" : "新建存储策略"}
-        onClose={() => !busy && setEdit(null)}
-        footer={
-          <Button
-            loading={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await api.savePolicy(edit!);
-                setEdit(null);
-                data.reload();
-                notify("存储策略已保存");
-              } catch (e) {
-                setError(errorText(e));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            保存策略
-          </Button>
-        }
-      >
-        {edit && (
-          <div className="islet-form">
-            <TextField
-              label="名称"
-              value={edit.name}
-              onChange={(v) => update("name", v)}
-            />
-            <Choice
-              label="存储类型"
-              value={edit.driver}
-              onChange={(v) => update("driver", v)}
-              options={[
-                { value: "local", label: "本地磁盘" },
-                { value: "s3", label: "S3 / 阿里云 OSS" },
-              ]}
-            />
-            {edit.driver === "s3" && (
-              <>
-                {[
-                  ["endpoint", "服务地址"],
-                  ["region", "区域"],
-                  ["bucket", "存储桶"],
-                  ["prefix", "路径前缀"],
-                  ["cdn", "图片加速地址"],
-                  ["access_key", "访问密钥 ID"],
-                  ["secret_key", "访问密钥（留空保留已有）"],
-                ].map(([key, label]) => (
-                  <TextField
-                    key={key}
-                    label={label}
-                    value={String(edit[key as keyof PolicyInput] || "")}
-                    type={key === "secret_key" ? "password" : "text"}
-                    onChange={(v) => update(key, v)}
-                  />
-                ))}
-                <Checkbox
-                  label="启用阿里云 CDN 缓存同步"
-                  checked={!!edit.cdn_refresh}
-                  onChange={(e) => update("cdn_refresh", e.target.checked)}
-                />
-                <p className="fp-muted">
-                  加速域名须回源至本站；访问密钥需具备该域名的刷新与查询权限。限制、恢复和回收图片时自动同步访问状态。
-                </p>
-                <Checkbox
-                  label="使用路径风格访问"
-                  checked={edit.path_style}
-                  onChange={(e) => update("path_style", e.target.checked)}
-                />
-              </>
-            )}
-            <Choice
-              label="命名方式"
-              value={edit.naming}
-              onChange={(v) => update("naming", v)}
-              options={[
-                { value: "date", label: "日期目录" },
-                { value: "random", label: "随机名称" },
-                { value: "keep", label: "保留文件名" },
-              ]}
-            />
-            <p className="fp-muted">
-              启用加速与缓存同步后，分享链接默认使用
-              CDN。对象存储应设置为私有读取，保留本站的审核与恢复能力。
-            </p>
-            <Choice
-              label="状态"
-              value={edit.status}
-              onChange={(v) => update("status", v)}
-              options={[
-                { value: "active", label: "启用" },
-                { value: "disabled", label: "停用" },
-              ]}
-            />
-            <Checkbox
-              label="设为默认存储"
-              checked={edit.is_default}
-              onChange={(e) => update("is_default", e.target.checked)}
-            />
-            <Failure error={error} />
-          </div>
-        )}
-      </Dialog>
       {remove !== undefined && (
         <Confirm
           title="删除存储策略"

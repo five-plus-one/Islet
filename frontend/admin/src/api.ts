@@ -371,7 +371,22 @@ export const api = {
       { method: "POST" },
     ),
 
-  groups: () => request<{ items: GroupView[] }>("/api/admin/user-groups"),
+  groups: async () => {
+    const result = await request<{
+      items: (Omit<GroupView, "policy_ids" | "allowed_mimes"> & {
+        policy_ids: number[] | null;
+        allowed_mimes: string[] | null;
+      })[];
+    }>("/api/admin/user-groups");
+    return {
+      ...result,
+      items: result.items.map((group) => ({
+        ...group,
+        policy_ids: group.policy_ids ?? [],
+        allowed_mimes: group.allowed_mimes ?? [],
+      })),
+    };
+  },
   saveGroup: (input: Partial<GroupView> & { name: string }) =>
     input.id
       ? request<GroupView>(`/api/admin/user-groups/${input.id}`, {

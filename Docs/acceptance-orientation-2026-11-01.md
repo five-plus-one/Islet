@@ -1,5 +1,9 @@
 # 照片方向验收
 
+## 浏览器页面验收
+
+通过浏览器专用工具检查正式站相册、图片列表与图片详情。媒体预览以固定容器约束图片，按原始比例居中完整显示横图和竖图；封面、列表和上传结果采用同一显示规则。验收覆盖刷新、相册进入与返回、深浅色、宽窄窗口及键盘关闭预览。
+
 正式版本：`production-20261101.02`。修复提交：[d0f88ec](https://github.com/five-plus-one/Islet/commit/d0f88ec9face9fde15ff44e386a3cd330b68289d)。[CI 通过](https://github.com/five-plus-one/Islet/actions/runs/41277906951)。
 
 缩略图按照片 EXIF 方向处理旋转与镜像，上传宽高对应显示尺寸；原图保持原始字节。支持 JPEG APP1、PNG eXIf 与 WebP EXIF，异常元数据回退正常方向，解码前执行大小与像素限制。

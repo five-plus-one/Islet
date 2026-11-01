@@ -5,16 +5,18 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 
 	"islet/backend/internal/model"
 )
 
 var (
-	ErrGroupNotFound   = errors.New("用户分组不存在")
-	ErrGroupNameExists = errors.New("分组名称已存在")
-	ErrGroupBuiltIn    = errors.New("内置分组不可删除")
-	ErrGroupInUse      = errors.New("分组仍有用户，无法删除")
+	ErrGroupNotFound    = errors.New("用户分组不存在")
+	ErrGroupNameExists  = errors.New("分组名称已存在")
+	ErrGroupBuiltIn     = errors.New("内置分组不可删除")
+	ErrGroupInUse       = errors.New("分组仍有用户，无法删除")
+	ErrGroupNameInvalid = errors.New("分组名称不能为空，最多 64 字")
 )
 
 // GroupService 用户分组管理。
@@ -68,7 +70,7 @@ func (s *GroupService) Get(id uint64) (model.UserGroup, error) {
 func (s *GroupService) Create(in GroupInput) (model.UserGroup, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" || len([]rune(name)) > 64 {
-		return model.UserGroup{}, errors.New("分组名称不能为空，最多 64 字")
+		return model.UserGroup{}, ErrGroupNameInvalid
 	}
 	group := model.UserGroup{
 		Name: name, Description: strings.TrimSpace(in.Description),
@@ -81,10 +83,7 @@ func (s *GroupService) Create(in GroupInput) (model.UserGroup, error) {
 		group.Status = model.StatusDisabled
 	}
 	if err := s.db.Create(&group).Error; err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) {
-			return model.UserGroup{}, ErrGroupNameExists
-		}
-		return model.UserGroup{}, err
+		return model.UserGroup{}, groupWriteError(err)
 	}
 	return group, nil
 }
@@ -96,7 +95,7 @@ func (s *GroupService) Update(id uint64, in GroupInput) (model.UserGroup, error)
 	}
 	name := strings.TrimSpace(in.Name)
 	if name == "" || len([]rune(name)) > 64 {
-		return model.UserGroup{}, errors.New("分组名称不能为空，最多 64 字")
+		return model.UserGroup{}, ErrGroupNameInvalid
 	}
 	updates := map[string]any{
 		"name": name, "description": strings.TrimSpace(in.Description),
@@ -115,9 +114,17 @@ func (s *GroupService) Update(id uint64, in GroupInput) (model.UserGroup, error)
 		updates["status"] = in.Status
 	}
 	if err := s.db.Model(&group).Updates(updates).Error; err != nil {
-		return model.UserGroup{}, err
+		return model.UserGroup{}, groupWriteError(err)
 	}
 	return s.Get(id)
+}
+
+func groupWriteError(err error) error {
+	var duplicate *mysql.MySQLError
+	if errors.Is(err, gorm.ErrDuplicatedKey) || (errors.As(err, &duplicate) && duplicate.Number == 1062) {
+		return ErrGroupNameExists
+	}
+	return err
 }
 
 func (s *GroupService) Delete(id uint64) error {

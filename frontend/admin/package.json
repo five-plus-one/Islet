@@ -1,9 +1,10 @@
 {
   "name": "islet-admin",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:e2e": "playwright test",
     "dev": "vite --host 127.0.0.1",
     "type-check": "tsc --noEmit",

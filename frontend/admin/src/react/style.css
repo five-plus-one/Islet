@@ -337,3 +337,11 @@ legend {
 .islet-stats {
   grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
 }
+.islet-admin-editor {
+  width: 100%;
+  max-width: 1120px;
+  flex-shrink: 0;
+}
+.islet-admin-editor .fp-console-form > footer {
+  bottom: 0;
+}

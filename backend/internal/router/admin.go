@@ -121,6 +121,19 @@ func policyError(c *gin.Context, err error) {
 }
 
 // registerGroupRoutes 用户分组管理（admin+）。
+func groupError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, service.ErrGroupNotFound):
+		response.NotFound(c, err.Error())
+	case errors.Is(err, service.ErrGroupNameInvalid):
+		response.BadRequest(c, err.Error())
+	case errors.Is(err, service.ErrGroupNameExists), errors.Is(err, service.ErrGroupBuiltIn), errors.Is(err, service.ErrGroupInUse):
+		response.Error(c, http.StatusConflict, 4009, err.Error())
+	default:
+		response.ServerError(c, "分组操作暂未完成，请稍后重试")
+	}
+}
+
 func registerGroupRoutes(admin *gin.RouterGroup, deps *Deps) {
 	admin.GET("/user-groups", func(c *gin.Context) {
 		groups, err := deps.Groups.List()
@@ -151,7 +164,7 @@ func registerGroupRoutes(admin *gin.RouterGroup, deps *Deps) {
 		}
 		group, err := deps.Groups.Create(in)
 		if err != nil {
-			response.Error(c, http.StatusConflict, 4009, err.Error())
+			groupError(c, err)
 			return
 		}
 		deps.Audit.Record(&user.ID, "group.create", "user_group", strconv.FormatUint(group.ID, 10), nil, clientIP(c))
@@ -167,7 +180,7 @@ func registerGroupRoutes(admin *gin.RouterGroup, deps *Deps) {
 		}
 		group, err := deps.Groups.Update(id, in)
 		if err != nil {
-			response.Error(c, http.StatusConflict, 4009, err.Error())
+			groupError(c, err)
 			return
 		}
 		deps.Audit.Record(&user.ID, "group.update", "user_group", c.Param("id"), nil, clientIP(c))
@@ -177,7 +190,7 @@ func registerGroupRoutes(admin *gin.RouterGroup, deps *Deps) {
 		user, _ := middleware.CurrentUser(c)
 		id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 		if err := deps.Groups.Delete(id); err != nil {
-			response.Error(c, http.StatusConflict, 4009, err.Error())
+			groupError(c, err)
 			return
 		}
 		deps.Audit.Record(&user.ID, "group.delete", "user_group", c.Param("id"), nil, clientIP(c))

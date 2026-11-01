@@ -3,6 +3,8 @@
 | 文档 | 内容 |
 |------|------|
 | [product-design.md](product-design.md) | 产品目标、信息架构、交互规范与验收计划 |
+| [admin-editing.md](admin-editing.md) | 分组、存储策略编辑流程与弹层验收要求 |
+| [acceptance-admin-editing-2026-11-01.md](acceptance-admin-editing-2026-11-01.md) | 管理端编辑、草稿与配置保存验收 |
 | [image-workspace.md](image-workspace.md) | 上传取链、相册封面与客户端连接交互 |
 | [acceptance-image-workspace-2026-10-31.md](acceptance-image-workspace-2026-10-31.md) | 图片工作台交互、布局及上线验收 |
 | [acceptance-orientation-2026-11-01.md](acceptance-orientation-2026-11-01.md) | 照片方向、缩略图重建及上线验收 |
